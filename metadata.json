@@ -1,0 +1,5 @@
+{
+  "name": "ON and ORDER v.1",
+  "description": "A logic puzzle game where players deduce a secret sequence of unique digits. Features 1-player vs AI and 2-player modes.",
+  "requestFramePermissions": []
+}
