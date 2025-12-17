@@ -1,3 +1,11 @@
+self.addEventListener('install', (event) => {
+  self.skipWaiting(); // Forces the waiting service worker to become the active one
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(clients.claim()); // Take control of all open tabs immediately
+});
+
 /* eslint-disable no-restricted-globals */
 const CACHE_NAME = 'on-and-order-v1';
 const urlsToCache = [
@@ -5,6 +13,7 @@ const urlsToCache = [
   '/index.html',
   '/manifest.json'
 ];
+
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
