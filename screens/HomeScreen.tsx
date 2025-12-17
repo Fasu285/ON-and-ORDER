@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GameConfig, GameMode, User, LobbyUser } from '../types';
 import { TEST_VECTORS } from '../components/constants';
 import { runTestVectors } from '../utils/gameLogic';
-import { joinLobby, leaveLobby, listenToLobby, sendInvite, listenForInvites } from '../utils/network';
+import { joinLobby, leaveLobby, listenToLobby, sendInvite, listenForInvites, updateHeartbeat } from '../utils/network';
 import Button from '../components/Button';
 
 interface HomeScreenProps {
@@ -35,6 +35,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
   const [lobbyPlayers, setLobbyPlayers] = useState<LobbyUser[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [inviteReceived, setInviteReceived] = useState<any>(null);
+  
+  // Refs for intervals
+  const heartbeatRef = useRef<any>(null);
 
   // Load favorites
   useEffect(() => {
@@ -51,7 +54,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
   // Lobby & Invite Listener
   useEffect(() => {
     if (step === 'online-menu') {
-        // Join Lobby
+        // 1. Join Lobby Immediately
         joinLobby({
             username: user.username,
             n: selectedN,
@@ -60,11 +63,18 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
             lastSeen: Date.now()
         });
 
+        // 2. Setup Heartbeat (every 30s)
+        heartbeatRef.current = setInterval(() => {
+             updateHeartbeat(user.username);
+        }, 30000);
+
+        // 3. Listen for other players
         const unsubLobby = listenToLobby((users) => {
-            // Filter out self and inactive (>1min)
+            // Show everyone except self.
+            // Note: We filter out really old users (inactive > 2 mins)
             const active = users.filter(u => 
                 u.username !== user.username && 
-                (Date.now() - u.lastSeen < 60000)
+                (Date.now() - u.lastSeen < 120000)
             );
             
             // Sort: Favorites first, then Alphabetical
@@ -79,11 +89,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
             setLobbyPlayers(active);
         });
 
+        // 4. Listen for invites
         const unsubInvites = listenForInvites(user.username, (invite) => {
             setInviteReceived(invite);
         });
 
         return () => {
+            if (heartbeatRef.current) clearInterval(heartbeatRef.current);
             leaveLobby(user.username);
             unsubLobby();
             unsubInvites();
@@ -132,11 +144,16 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       alert("Please enter a valid 4-character code");
       return;
     }
+    const code = matchCodeInput.toUpperCase();
+    
+    // Feedback
+    console.log(`Joining room ${code} as Guest...`);
+    
     onStartGame({
       mode: GameMode.ONLINE,
-      n: 4, 
+      n: 4, // Guest accepts host's config usually, this is default
       timeLimit: 30,
-      matchCode: matchCodeInput.toUpperCase(),
+      matchCode: code,
       role: 'GUEST'
     });
   };
@@ -305,22 +322,36 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
 
           {/* Lobby List */}
           <div className="flex-1 overflow-y-auto bg-gray-50 rounded-lg border border-gray-200 p-2 mb-4">
+              <div className="text-xs text-gray-400 font-bold mb-2 uppercase text-center">
+                  Online Players ({lobbyPlayers.length})
+              </div>
+              
               {lobbyPlayers.length === 0 ? (
-                  <div className="text-center text-gray-400 mt-10">No players online.<br/>Share your code manually below.</div>
+                  <div className="text-center text-gray-400 mt-10 p-4 border-2 border-dashed border-gray-200 rounded">
+                      No other players active.<br/><br/>
+                      <span className="text-xs">Ask a friend to join via link or code!</span>
+                  </div>
               ) : (
                   lobbyPlayers.map(player => (
-                      <div key={player.username} className="bg-white p-3 mb-2 rounded shadow-sm flex justify-between items-center">
+                      <div key={player.username} className="bg-white p-3 mb-2 rounded shadow-sm flex justify-between items-center border border-gray-100">
                           <div className="flex items-center gap-2">
-                             <button onClick={() => toggleFavorite(player.username)} className="text-xl focus:outline-none">
+                             <button onClick={() => toggleFavorite(player.username)} className={`text-xl focus:outline-none ${favorites.includes(player.username) ? 'text-yellow-400' : 'text-gray-300'}`}>
                                  {favorites.includes(player.username) ? '★' : '☆'}
                              </button>
                              <div>
-                                 <div className="font-bold text-sm">{player.username}</div>
-                                 <div className="text-xs text-gray-500">{player.n} Digits • {player.timeLimit}s</div>
+                                 <div className="font-bold text-sm text-gray-800">{player.username}</div>
+                                 <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wide">
+                                    {player.status === 'PLAYING' ? <span className="text-orange-500">In Match</span> : <span className="text-green-500">Online</span>}
+                                 </div>
                              </div>
                           </div>
-                          <Button variant="primary" className="!py-1 !px-3 !text-xs !min-h-[30px]" onClick={() => handleInviteConnect(player)}>
-                              CONNECT
+                          <Button 
+                             variant="primary" 
+                             className={`!py-1 !px-3 !text-xs !min-h-[30px] ${player.status === 'PLAYING' ? 'opacity-50' : ''}`} 
+                             onClick={() => handleInviteConnect(player)}
+                             disabled={player.status === 'PLAYING'}
+                          >
+                              {player.status === 'PLAYING' ? 'BUSY' : 'INVITE'}
                           </Button>
                       </div>
                   ))

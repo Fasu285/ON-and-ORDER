@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { ref, set, onValue, push, onDisconnect, remove, get } from 'firebase/database';
+import { ref, set, onValue, push, onDisconnect, remove, get, update } from 'firebase/database';
 import { LobbyUser } from '../types';
 
 type NetworkEventCallback = (data: any) => void;
@@ -68,6 +68,15 @@ export const joinLobby = (user: LobbyUser) => {
     });
     // Auto remove if they close browser
     onDisconnect(userRef).remove();
+};
+
+export const updateHeartbeat = (username: string) => {
+    if (!db) return;
+    const database = db;
+    const userRef = ref(database, `lobby/${username}`);
+    update(userRef, {
+        lastSeen: Date.now()
+    });
 };
 
 export const leaveLobby = (username: string) => {
