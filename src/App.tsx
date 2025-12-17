@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import HomeScreen from './screens/HomeScreen';
-import GameScreen from './screens/GameScreen';
-import AuthScreen from './screens/AuthScreen';
-import MatchHistoryScreen from './screens/MatchHistoryScreen';
-import { GameConfig, User } from './types';
-import { getActiveSession, clearActiveSession } from './utils/storage';
+import HomeScreen from '../screens/HomeScreen';
+import GameScreen from '../screens/GameScreen';
+import AuthScreen from '../screens/AuthScreen';
+import MatchHistoryScreen from '../screens/MatchHistoryScreen';
+import { GameConfig, User } from '../types';
+import { getActiveSession, clearActiveSession } from './src/utils/storage';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
