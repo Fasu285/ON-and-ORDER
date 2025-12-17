@@ -1,4 +1,4 @@
-import { TestVector } from './types';
+import { TestVector } from '../types';
 
 export const TEST_VECTORS: TestVector[] = [
   { n: 4, secret: '4725', guess: '2475', expectedOn: 4, expectedOrder: 1 },

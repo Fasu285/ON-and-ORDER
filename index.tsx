@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './src/App';
+import App from './App';
 
 // Register Service Worker
 if ('serviceWorker' in navigator) {

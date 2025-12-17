@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import HomeScreen from '../screens/HomeScreen';
-import GameScreen from '../screens/GameScreen';
-import AuthScreen from '../screens/AuthScreen';
-import MatchHistoryScreen from '../screens/MatchHistoryScreen';
-import { GameConfig, User } from '../types';
-import { getActiveSession, clearActiveSession } from '../utils/storage';
+import HomeScreen from './screens/HomeScreen';
+import GameScreen from './screens/GameScreen';
+import AuthScreen from './screens/AuthScreen';
+import MatchHistoryScreen from './screens/MatchHistoryScreen';
+import { GameConfig, User } from './types';
+import { getActiveSession, clearActiveSession } from './utils/storage';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -55,6 +55,11 @@ const App: React.FC = () => {
     setCurrentScreen('home');
   };
 
+  const handleUpdateUser = (updatedUser: User) => {
+    setUser(updatedUser);
+    localStorage.setItem('on_order_user', JSON.stringify(updatedUser));
+  };
+
   const handleLogout = () => {
     setUser(null);
     localStorage.removeItem('on_order_user');
@@ -98,6 +103,7 @@ const App: React.FC = () => {
           onResumeGame={handleResumeGame}
           hasActiveGame={hasActiveGame}
           onLogout={handleLogout} 
+          onUpdateUser={handleUpdateUser}
           onViewHistory={handleViewHistory}
         />
       )}

@@ -66,9 +66,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   // Network Ref
   const networkRef = useRef<NetworkAdapter | null>(null);
   
-  // Used to prevent processing our own messages if they bounce back
-  const lastProcessedMsgId = useRef<string>('');
-
   // --- Persistence Effect ---
   useEffect(() => {
     saveActiveSession(gameState);
@@ -77,9 +74,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   // --- Network Setup ---
   useEffect(() => {
     if (isOnline && config.matchCode) {
-      const net = new NetworkAdapter(config.matchCode, (msg: any) => {
-         // Dedup check logic if needed, but sender check handles most
-         if (msg.senderId === lastProcessedMsgId.current) return;
+      const net = new NetworkAdapter(config.matchCode, user.username, (msg: any) => {
+         // Sender filtering is now done in NetworkAdapter, so we trust these messages are external
          handleNetworkMessage(msg);
       });
       networkRef.current = net;
@@ -166,10 +162,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   };
 
   const handleNetworkMessage = (msg: any) => {
-    if (msg.payload && msg.payload.username === user.username) return; // Extra check for self
-    if (msg.payload && msg.payload.from === user.username) return; 
-
-    // console.log("Received Msg", msg);
+    // Basic payload check for safety, though Adapter filters most
+    if (msg.payload && msg.payload.username === user.username) return; 
 
     switch (msg.type) {
       case 'SYNC_REQUEST':
@@ -195,6 +189,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
             const newP2Secret = prev.player2Secret || remote.p2Secret;
             
             let newPhase = prev.phase;
+            // Phase reconciliation
             if ((prev.phase === GamePhase.WAITING_FOR_OPPONENT || prev.phase === GamePhase.SETUP_P1 || prev.phase === GamePhase.SETUP_P2) 
                 && (remote.phase === GamePhase.TURN_P1 || remote.phase === GamePhase.TURN_P2)) {
                 newPhase = remote.phase;
@@ -270,6 +265,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
           if (p1Secret && p2Secret) {
             nextPhase = GamePhase.TURN_P1;
             msgText = isPlayer1 ? 'Your Turn!' : 'Opponent\'s Turn';
+          } else {
+             msgText = isPlayer1 ? 'Waiting for opponent...' : 'Waiting for host...';
           }
 
           return {
@@ -286,9 +283,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
         setGameState(prev => {
           const guess = msg.payload.guess;
           const isOpponentP1 = msg.payload.isPlayer1;
-          
-          // Logic to avoid double processing if sync handles it
-          // But sync is usually delayed.
           
           const targetSecret = isPlayer1 ? prev.player1Secret : prev.player2Secret; 
           const result = computeOnAndOrder(targetSecret, guess);
@@ -821,8 +815,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
 
       {/* Footer / Input Area - Fixed Height (flex-none) */}
       { !showMatchCode && (
-      <div className="bg-white border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] flex-none z-20">
-        <div className="p-2 pb-safe">
+      <div className="bg-white border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] flex-none z-20 pb-safe">
+        <div className="p-2">
           {gameState.phase === GamePhase.GAME_OVER && (
             <div className="mb-2 text-center">
                <div className="text-[10px] font-bold text-gray-400 uppercase mb-1">Secrets</div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { GameConfig, GameMode, User, LobbyUser } from '../types';
-import { TEST_VECTORS } from '../constants';
+import { TEST_VECTORS } from '../components/constants';
 import { runTestVectors } from '../utils/gameLogic';
 import { joinLobby, leaveLobby, listenToLobby, sendInvite, listenForInvites } from '../utils/network';
 import Button from '../components/Button';
@@ -11,10 +11,11 @@ interface HomeScreenProps {
   onResumeGame?: () => void;
   hasActiveGame?: boolean;
   onLogout: () => void;
+  onUpdateUser: (user: User) => void;
   onViewHistory: () => void;
 }
 
-const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame, hasActiveGame, onLogout, onViewHistory }) => {
+const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame, hasActiveGame, onLogout, onUpdateUser, onViewHistory }) => {
   const [step, setStep] = useState<'menu' | 'mode' | 'settings' | 'online-menu'>('menu');
   const [selectedMode, setSelectedMode] = useState<GameMode>(GameMode.SINGLE_PLAYER);
   const [testResults, setTestResults] = useState<string | null>(null);
@@ -40,6 +41,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
     const saved = localStorage.getItem('on_order_favorites');
     if (saved) setFavorites(JSON.parse(saved));
   }, []);
+
+  // Update local edit state when user prop changes (e.g. after update)
+  useEffect(() => {
+      setEditUsername(user.username);
+      setEditContact(user.contact);
+  }, [user]);
 
   // Lobby & Invite Listener
   useEffect(() => {
@@ -94,13 +101,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
 
   const handleUpdateProfile = (e: React.FormEvent) => {
       e.preventDefault();
-      // Simple validation reuse
       if (editUsername.length < 4) { alert("Username min 4 chars"); return; }
       
       const newUser = { ...user, username: editUsername, contact: editContact };
-      localStorage.setItem('on_order_user', JSON.stringify(newUser));
-      // Force reload to apply user change upstream or pass callback prop in real app
-      window.location.reload(); 
+      onUpdateUser(newUser); // Use parent callback
+      setShowProfile(false);
   };
 
   const handleNewMatchClick = () => {
@@ -203,7 +208,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
 
   if (showProfile) {
       return (
-          <div className="flex flex-col h-full bg-white p-6 max-w-md mx-auto w-full justify-center">
+          <div className="flex flex-col h-full bg-white p-6 max-w-md mx-auto w-full justify-center overflow-y-auto">
               <h2 className="text-2xl font-black mb-6">EDIT PROFILE</h2>
               <form onSubmit={handleUpdateProfile} className="space-y-4">
                   <div>
@@ -222,8 +227,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
   }
 
   return (
-    <div className="flex flex-col h-full bg-white p-6 max-w-md mx-auto w-full justify-center relative">
-      <div className="absolute top-4 right-4 flex gap-3">
+    <div className="flex flex-col h-full bg-white p-6 max-w-md mx-auto w-full justify-center relative overflow-y-auto">
+      <div className="absolute top-4 right-4 flex gap-3 z-10">
         <button onClick={() => setShowProfile(true)} className="text-xs font-bold text-blue-500 hover:text-blue-700 uppercase tracking-wide">
           Profile
         </button>
@@ -232,7 +237,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
         </button>
       </div>
 
-      <div className="mb-12 text-center animate-slide-in">
+      <div className="mb-12 text-center animate-slide-in flex-none">
         <h1 className="text-5xl font-black text-gray-900 tracking-tighter mb-2">
           ON<span className="text-blue-600">&</span><br/>ORDER
         </h1>
@@ -244,7 +249,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       </div>
 
       {step === 'menu' && (
-        <div className="space-y-4 w-full animate-slide-in" style={{ animationDelay: '0.1s' }}>
+        <div className="space-y-4 w-full animate-slide-in flex-none" style={{ animationDelay: '0.1s' }}>
           {hasActiveGame && (
              <Button fullWidth onClick={onResumeGame} className="mb-2 shadow-lg ring-4 ring-blue-50 border-blue-200 border">
                RESUME MATCH
@@ -270,7 +275,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       )}
 
       {step === 'mode' && (
-        <div className="space-y-4 w-full animate-slide-in">
+        <div className="space-y-4 w-full animate-slide-in flex-none">
           <h2 className="text-xl font-bold text-center mb-6">SELECT MODE</h2>
           <Button fullWidth onClick={() => handleModeSelect(GameMode.SINGLE_PLAYER)}>
             Single player (vs Computer)
@@ -289,10 +294,10 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
 
       {step === 'online-menu' && (
         <div className="space-y-4 w-full h-full flex flex-col animate-slide-in">
-          <h2 className="text-xl font-bold text-center mb-2">ONLINE LOBBY</h2>
+          <h2 className="text-xl font-bold text-center mb-2 flex-none">ONLINE LOBBY</h2>
           
           {inviteReceived && (
-              <div className="bg-purple-100 border-l-4 border-purple-600 p-3 mb-2 animate-bounce cursor-pointer" onClick={handleAcceptInvite}>
+              <div className="bg-purple-100 border-l-4 border-purple-600 p-3 mb-2 animate-bounce cursor-pointer flex-none" onClick={handleAcceptInvite}>
                   <p className="font-bold text-purple-800">INVITE FROM {inviteReceived.from}</p>
                   <p className="text-xs">Tap to join match!</p>
               </div>
@@ -338,7 +343,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
              </div>
           </div>
           
-          <div className="pt-2">
+          <div className="pt-2 flex-none">
             <Button fullWidth variant="secondary" onClick={() => setStep('settings')}>
                 HOST PRIVATE MATCH
             </Button>
@@ -350,7 +355,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       )}
 
       {step === 'settings' && (
-        <div className="space-y-6 w-full animate-slide-in">
+        <div className="space-y-6 w-full animate-slide-in flex-none">
           <h2 className="text-xl font-bold text-center mb-2">GAME SETTINGS</h2>
 
           {hasActiveGame && (
@@ -413,8 +418,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
         </div>
       )}
       
-      <div className="mt-auto text-center text-xs text-gray-300 py-4">
-        v1.3.0
+      <div className="mt-auto text-center text-xs text-gray-300 py-4 flex-none">
+        v1.3.1
       </div>
     </div>
   );

@@ -6,12 +6,14 @@ type NetworkEventCallback = (data: any) => void;
 
 export class NetworkAdapter {
   private matchCode: string;
+  private userId: string;
   private onMessage: NetworkEventCallback;
   private matchRef: any;
   private unsubscribe: (() => void) | null = null;
 
-  constructor(matchCode: string, onMessage: NetworkEventCallback) {
+  constructor(matchCode: string, userId: string, onMessage: NetworkEventCallback) {
     this.matchCode = matchCode;
+    this.userId = userId;
     this.onMessage = onMessage;
     
     if (db) {
@@ -19,12 +21,11 @@ export class NetworkAdapter {
       // Listen for updates
       this.unsubscribe = onValue(this.matchRef, (snapshot) => {
         const val = snapshot.val();
-        if (val) {
+        if (val && val.lastMessage) {
           // Process message if it exists. 
-          // Relaxed timestamp check: Message must be reasonably recent (within last 60s) to avoid stale state on reload,
-          // but long enough to account for latency/clock skew.
-          // Dedup is handled by GameScreen via senderId.
-          if (val.lastMessage && val.lastMessage.timestamp > (Date.now() - 60000)) {
+          // 1. Timestamp check: reasonably recent (within last 60s)
+          // 2. Sender check: ignore messages from self (echo)
+          if (val.lastMessage.from !== this.userId && val.lastMessage.timestamp > (Date.now() - 60000)) {
              this.onMessage(val.lastMessage);
           }
         }
@@ -39,7 +40,7 @@ export class NetworkAdapter {
         type, 
         payload, 
         timestamp: Date.now(), 
-        senderId: Math.random() 
+        from: this.userId 
     };
 
     set(this.matchRef, {
