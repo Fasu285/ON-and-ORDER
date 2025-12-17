@@ -1,11 +1,11 @@
 import { initializeApp } from "firebase/app";
-import { getDatabase } from "firebase/database";
+import { getDatabase, Database } from "firebase/database";
 
-// Helper to safely access env vars without crashing if import.meta.env is undefined
+// Helper to safely access env vars in Vite
 const getEnv = (key: string) => {
   try {
     // @ts-ignore
-    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
+    if (import.meta.env && import.meta.env[key]) {
       // @ts-ignore
       return import.meta.env[key];
     }
@@ -26,9 +26,11 @@ const firebaseConfig = {
 };
 
 let app;
-let db = null;
+let db: Database | null = null;
 
-const isConfigured = firebaseConfig.apiKey && firebaseConfig.apiKey !== "REPLACE_WITH_YOUR_API_KEY";
+const isConfigured = firebaseConfig.apiKey && 
+                     firebaseConfig.apiKey !== "REPLACE_WITH_YOUR_API_KEY" &&
+                     !firebaseConfig.apiKey.includes("REPLACE");
 
 if (isConfigured) {
     try {
@@ -39,7 +41,8 @@ if (isConfigured) {
         console.error("Firebase initialization error:", e);
     }
 } else {
-    console.warn("Firebase configuration missing. Please update utils/firebase.ts or set environment variables.");
+    // Info log instead of warning to reduce console noise in offline/demo modes
+    console.info("Firebase not configured. Running in offline/demo mode.");
 }
 
 export { db };
