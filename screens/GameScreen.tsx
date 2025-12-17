@@ -37,7 +37,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
     return {
       matchId: 'match-' + Date.now(),
       config,
-      phase: isOnline ? (isHost ? GamePhase.WAITING_FOR_OPPONENT : GamePhase.WAITING_FOR_OPPONENT) : GamePhase.SETUP_P1,
+      phase: isOnline ? GamePhase.WAITING_FOR_OPPONENT : GamePhase.SETUP_P1,
       player1Secret: '',
       player2Secret: '', 
       player1History: [],
@@ -53,18 +53,16 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   const [isAiThinking, setIsAiThinking] = useState(false);
   
   // Timer State - Use Saved time if available, else Configured Time Limit
-  // We use a lazy initializer to correctly pick up the saved time on resume
   const [timeLeft, setTimeLeft] = useState<number>(() => {
     return gameState.timeLeft ?? gameState.config.timeLimit ?? 30;
   });
   
-  // Refs to track previous state for timer reset logic
+  // Refs
   const prevPhase = useRef(gameState.phase);
   const prevP1Moves = useRef(gameState.player1History.length);
   const prevP2Moves = useRef(gameState.player2History.length);
-
-  // Network Ref
   const networkRef = useRef<NetworkAdapter | null>(null);
+  const connectionInterval = useRef<any>(null);
   
   // --- Persistence Effect ---
   useEffect(() => {
@@ -75,40 +73,51 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   useEffect(() => {
     if (isOnline && config.matchCode) {
       const net = new NetworkAdapter(config.matchCode, user.username, (msg: any) => {
-         // Sender filtering is now done in NetworkAdapter, so we trust these messages are external
          handleNetworkMessage(msg);
       });
       networkRef.current = net;
 
-      // On connect/refresh, request sync
-      const initTimeout = setTimeout(() => {
-         net.send('SYNC_REQUEST', { from: user.username });
-         // Also send JOIN if strictly needed
-         if (!isHost && gameState.player1History.length === 0 && gameState.phase === GamePhase.WAITING_FOR_OPPONENT) {
-            net.send('PLAYER_JOINED', { username: user.username });
-         }
-      }, 1000); // Slight delay for connection
+      // Robust Connection / Handshake Logic
+      // Clear any existing interval just in case
+      if (connectionInterval.current) clearInterval(connectionInterval.current);
+
+      connectionInterval.current = setInterval(() => {
+          // If we are waiting for opponent (Host or Guest)
+          if (gameState.phase === GamePhase.WAITING_FOR_OPPONENT) {
+             // Guest: Spam PLAYER_JOINED until accepted (Game Started)
+             if (!isHost) {
+                 net.send('PLAYER_JOINED', { username: user.username });
+             }
+             // Both: Request Sync to catch up state
+             net.send('SYNC_REQUEST', { from: user.username });
+          } else {
+             // Once game started, stop spamming handshake
+             if (connectionInterval.current) {
+                 clearInterval(connectionInterval.current);
+                 connectionInterval.current = null;
+             }
+          }
+      }, 2000); // Retry every 2 seconds
 
       return () => {
-        clearTimeout(initTimeout);
+        if (connectionInterval.current) clearInterval(connectionInterval.current);
         net.cleanup();
       };
     }
-  }, [isOnline, config.matchCode]); 
+  }, [isOnline, config.matchCode, isHost, user.username, gameState.phase]); 
 
   // --- Timer Logic ---
   const isMyTurn = () => {
     if (gameState.phase === GamePhase.GAME_OVER) return false;
-    if (isAiThinking) return false; // Pause timer if AI is thinking
+    if (isAiThinking) return false;
     
     if (isOnline) {
       if (isPlayer1 && gameState.phase === GamePhase.TURN_P1) return true;
       if (!isPlayer1 && gameState.phase === GamePhase.TURN_P2) return true;
     } else if (isSinglePlayer) {
-      // In 1P, if it's P1 turn, it's my turn
       if (gameState.phase === GamePhase.TURN_P1) return true;
     } else {
-      // Local 2P: Always someone's turn unless Game Over
+      // Local 2P
       if (gameState.phase === GamePhase.TURN_P1 || gameState.phase === GamePhase.TURN_P2) return true;
     }
     return false;
@@ -162,76 +171,96 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   };
 
   const handleNetworkMessage = (msg: any) => {
-    // Basic payload check for safety, though Adapter filters most
     if (msg.payload && msg.payload.username === user.username) return; 
 
     switch (msg.type) {
       case 'SYNC_REQUEST':
-        networkRef.current?.send('SYNC_RESPONSE', {
-            phase: gameState.phase,
-            p1Secret: gameState.player1Secret,
-            p2Secret: gameState.player2Secret,
-            p1History: gameState.player1History,
-            p2History: gameState.player2History,
-            configN: gameState.config.n,
-            configTime: gameState.config.timeLimit,
-            opponentName: user.username 
-        });
+        // Only Host needs to respond to Sync Requests generally, but p2p can echo
+        if (isHost || gameState.phase !== GamePhase.WAITING_FOR_OPPONENT) {
+            networkRef.current?.send('SYNC_RESPONSE', {
+                phase: gameState.phase,
+                p1Secret: gameState.player1Secret,
+                p2Secret: gameState.player2Secret,
+                p1History: gameState.player1History,
+                p2History: gameState.player2History,
+                configN: gameState.config.n,
+                configTime: gameState.config.timeLimit,
+                opponentName: isHost ? gameState.opponentName : user.username, // Send known opponent name
+                hostName: isHost ? user.username : undefined
+            });
+        }
         break;
 
       case 'SYNC_RESPONSE':
         setGameState(prev => {
             const remote = msg.payload;
-            const newP1History = remote.p1History.length > prev.player1History.length ? remote.p1History : prev.player1History;
-            const newP2History = remote.p2History.length > prev.player2History.length ? remote.p2History : prev.player2History;
+            // If we are Guest and stuck in waiting, and host says game started, jump to it
+            if (!isHost && prev.phase === GamePhase.WAITING_FOR_OPPONENT) {
+                if (remote.phase !== GamePhase.WAITING_FOR_OPPONENT) {
+                    return {
+                        ...prev,
+                        phase: GamePhase.SETUP_P2, // Default entry for guest
+                        config: { 
+                            ...prev.config, 
+                            n: remote.configN || prev.config.n,
+                            timeLimit: remote.configTime || prev.config.timeLimit 
+                        },
+                        opponentName: remote.hostName || prev.opponentName,
+                        message: "Connected! Set your secret."
+                    };
+                }
+            }
+            
+            // Standard Sync Logic
+            const newP1History = remote.p1History?.length > prev.player1History.length ? remote.p1History : prev.player1History;
+            const newP2History = remote.p2History?.length > prev.player2History.length ? remote.p2History : prev.player2History;
             
             const newP1Secret = prev.player1Secret || remote.p1Secret;
             const newP2Secret = prev.player2Secret || remote.p2Secret;
             
             let newPhase = prev.phase;
-            // Phase reconciliation
-            if ((prev.phase === GamePhase.WAITING_FOR_OPPONENT || prev.phase === GamePhase.SETUP_P1 || prev.phase === GamePhase.SETUP_P2) 
-                && (remote.phase === GamePhase.TURN_P1 || remote.phase === GamePhase.TURN_P2)) {
-                newPhase = remote.phase;
-            } else if (newP1Secret && newP2Secret && prev.phase !== GamePhase.GAME_OVER) {
-                if (newP1History.length === newP2History.length) newPhase = GamePhase.TURN_P1;
-                else newPhase = GamePhase.TURN_P2;
+            
+            // Allow syncing out of waiting room
+            if (prev.phase === GamePhase.WAITING_FOR_OPPONENT && remote.phase !== GamePhase.WAITING_FOR_OPPONENT) {
+                 newPhase = isHost ? GamePhase.SETUP_P1 : GamePhase.SETUP_P2;
+            } else {
+                 // Gameplay sync
+                 if (newP1Secret && newP2Secret && prev.phase !== GamePhase.GAME_OVER) {
+                    if (newP1History.length === newP2History.length) newPhase = GamePhase.TURN_P1;
+                    else newPhase = GamePhase.TURN_P2;
+                }
             }
+            
+            // Determine Message
+            let msgText = prev.message;
+            if (newPhase === GamePhase.TURN_P1) msgText = isPlayer1 ? "Your Turn!" : "Opponent's Turn";
+            if (newPhase === GamePhase.TURN_P2) msgText = !isPlayer1 ? "Your Turn!" : "Opponent's Turn";
 
             return {
                 ...prev,
                 player1Secret: newP1Secret,
                 player2Secret: newP2Secret,
-                player1History: newP1History,
-                player2History: newP2History,
+                player1History: newP1History || [],
+                player2History: newP2History || [],
                 phase: newPhase,
                 config: { 
                     ...prev.config, 
                     n: remote.configN || prev.config.n,
                     timeLimit: remote.configTime || prev.config.timeLimit 
                 },
-                opponentName: remote.opponentName || prev.opponentName,
-                message: newPhase === GamePhase.TURN_P1 
-                    ? (isPlayer1 ? "Your Turn!" : "Opponent's Turn")
-                    : (newPhase === GamePhase.TURN_P2 
-                        ? (!isPlayer1 ? "Your Turn!" : "Opponent's Turn")
-                        : prev.message)
+                opponentName: remote.opponentName || (remote.hostName && !isHost ? remote.hostName : prev.opponentName),
+                message: msgText
             };
         });
         break;
 
       case 'PLAYER_JOINED':
         if (isHost && gameState.phase === GamePhase.WAITING_FOR_OPPONENT) {
-          networkRef.current?.send('GAME_START_CONFIG', { 
-              n: config.n, 
-              timeLimit: config.timeLimit,
-              hostName: user.username 
-          });
+          // Just update the UI to show opponent is here, DO NOT auto start
           setGameState(prev => ({
             ...prev,
-            phase: GamePhase.SETUP_P1,
-            message: 'Opponent Joined! Set your secret.',
-            opponentName: msg.payload.username
+            opponentName: msg.payload.username,
+            message: `${msg.payload.username} Joined! Ready to start.`
           }));
         }
         break;
@@ -246,7 +275,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
                 timeLimit: msg.payload.timeLimit 
             },
             phase: GamePhase.SETUP_P2, 
-            message: 'Connected! Set your secret.',
+            message: 'Game Started! Set your secret.',
             opponentName: msg.payload.hostName
           }));
         }
@@ -323,6 +352,22 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
           };
         });
         break;
+    }
+  };
+
+  // --- Host Start Game Action ---
+  const handleHostStartGame = () => {
+    if (isHost && isOnline) {
+        networkRef.current?.send('GAME_START_CONFIG', { 
+            n: config.n, 
+            timeLimit: config.timeLimit,
+            hostName: user.username 
+        });
+        setGameState(prev => ({
+            ...prev,
+            phase: GamePhase.SETUP_P1,
+            message: "Set your secret code"
+        }));
     }
   };
 
@@ -662,14 +707,9 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
           player2History: [],
           message: isHost ? `Waiting for opponent... Code: ${config.matchCode}` : 'Connecting to Host...',
           winner: null,
-          timeLeft: config.timeLimit
+          timeLeft: config.timeLimit,
+          opponentName: undefined
        }));
-       // Re-trigger connection/handshake logic
-       setTimeout(() => {
-          if (!isHost) {
-            networkRef.current?.send('PLAYER_JOINED', { username: user.username });
-          }
-       }, 500);
      } else {
        setGameState(prev => ({
           ...prev,
@@ -703,7 +743,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   if (isSetup || gameState.phase === GamePhase.WAITING_FOR_OPPONENT) headerTitle = "SETUP";
   if (gameState.phase === GamePhase.GAME_OVER) headerTitle = "GAME OVER";
 
-  const showMatchCode = isOnline && isHost && (gameState.phase === GamePhase.WAITING_FOR_OPPONENT || isSetup);
+  const showMatchCode = isOnline && isHost && (gameState.phase === GamePhase.WAITING_FOR_OPPONENT);
+  const showLobby = isOnline && gameState.phase === GamePhase.WAITING_FOR_OPPONENT;
 
   // Dynamic Names
   let leftLabel = user.username.toUpperCase();
@@ -783,14 +824,47 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
 
       {/* Main Content Area - Split Columns - Flexible Height with min-h-0 for scrolling */}
       <div className="flex-1 min-h-0 flex flex-row overflow-hidden">
-        {showMatchCode ? (
+        {showLobby ? (
           <div className="w-full flex flex-col items-center justify-center p-6 text-center animate-slide-in">
-             <h2 className="text-gray-500 font-bold mb-4 uppercase tracking-widest text-sm">Share Code</h2>
-             <div className="text-5xl font-black font-mono tracking-widest bg-gray-100 p-4 rounded-xl border-2 border-dashed border-gray-300 mb-8 select-all">
-                {config.matchCode}
+             {isHost && (
+                <>
+                    <h2 className="text-gray-500 font-bold mb-4 uppercase tracking-widest text-sm">Room Code</h2>
+                    <div className="text-5xl font-black font-mono tracking-widest bg-gray-100 p-4 rounded-xl border-2 border-dashed border-gray-300 mb-8 select-all">
+                        {config.matchCode}
+                    </div>
+                </>
+             )}
+             
+             <h3 className="text-gray-500 font-bold mb-4 uppercase tracking-widest text-xs">Players</h3>
+             <div className="w-full max-w-xs space-y-2 mb-8">
+                 <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 flex items-center gap-3">
+                     <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                     <span className="font-bold text-blue-900">{isHost ? user.username : (gameState.opponentName || 'Host')}</span>
+                     <span className="text-xs ml-auto uppercase text-blue-400 font-bold">HOST</span>
+                 </div>
+                 <div className={`p-3 rounded-lg border flex items-center gap-3 ${gameState.opponentName || !isHost ? 'bg-orange-50 border-orange-100' : 'bg-gray-50 border-gray-100 border-dashed'}`}>
+                     <div className={`w-2 h-2 rounded-full ${gameState.opponentName || !isHost ? 'bg-orange-500' : 'bg-gray-300'}`}></div>
+                     <span className={`font-bold ${gameState.opponentName || !isHost ? 'text-orange-900' : 'text-gray-400 italic'}`}>
+                        {isHost ? (gameState.opponentName || 'Waiting for guest...') : user.username}
+                     </span>
+                     {(gameState.opponentName || !isHost) && <span className="text-xs ml-auto uppercase text-orange-400 font-bold">GUEST</span>}
+                 </div>
              </div>
-             <p className="text-xs text-gray-400">Waiting for opponent...</p>
-             <div className="mt-6 animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+
+             {isHost ? (
+                 <Button 
+                   onClick={handleHostStartGame} 
+                   disabled={!gameState.opponentName}
+                   className="w-full max-w-xs h-14"
+                 >
+                     START GAME
+                 </Button>
+             ) : (
+                 <div className="flex flex-col items-center gap-3">
+                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                     <p className="text-xs text-gray-400">Waiting for host to start game...</p>
+                 </div>
+             )}
           </div>
         ) : (
           <>
@@ -814,7 +888,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
       </div>
 
       {/* Footer / Input Area - Fixed Height (flex-none) */}
-      { !showMatchCode && (
+      { !showLobby && (
       <div className="bg-white border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] flex-none z-20 pb-safe">
         <div className="p-2">
           {gameState.phase === GamePhase.GAME_OVER && (
