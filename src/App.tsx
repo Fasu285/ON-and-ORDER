@@ -4,7 +4,7 @@ import GameScreen from '../screens/GameScreen';
 import AuthScreen from '../screens/AuthScreen';
 import MatchHistoryScreen from '../screens/MatchHistoryScreen';
 import { GameConfig, User } from '../types';
-import { getActiveSession, clearActiveSession } from './src/utils/storage';
+import { getActiveSession, clearActiveSession } from '../utils/storage';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
