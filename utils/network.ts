@@ -20,10 +20,11 @@ export class NetworkAdapter {
       this.unsubscribe = onValue(this.matchRef, (snapshot) => {
         const val = snapshot.val();
         if (val) {
-          // Firebase returns the whole object. In a real app we might listen to a list of messages
-          // For this simple implementation, we assume the 'lastMessage' field drives the state
-          if (val.lastMessage && val.lastMessage.timestamp > (Date.now() - 5000)) {
-             // Only process recent messages to avoid flood on reconnect
+          // Process message if it exists. 
+          // Relaxed timestamp check: Message must be reasonably recent (within last 60s) to avoid stale state on reload,
+          // but long enough to account for latency/clock skew.
+          // Dedup is handled by GameScreen via senderId.
+          if (val.lastMessage && val.lastMessage.timestamp > (Date.now() - 60000)) {
              this.onMessage(val.lastMessage);
           }
         }
@@ -41,9 +42,6 @@ export class NetworkAdapter {
         senderId: Math.random() 
     };
 
-    // Update the match state with the latest message
-    // In a production app, we would push to a 'messages' list, but replacing a 'lastMessage' node
-    // is sufficient for this lock-step game state sync.
     set(this.matchRef, {
         lastMessage: message,
         updatedAt: Date.now()
@@ -54,8 +52,6 @@ export class NetworkAdapter {
     if (this.unsubscribe) {
         this.unsubscribe(); // Stop listening
     }
-    // Optional: If host, maybe remove match? 
-    // We leave it for now to allow reconnections
   }
 }
 
