@@ -60,7 +60,7 @@ export class NetworkAdapter {
 
 export const joinLobby = (user: LobbyUser) => {
     if (!db) return;
-    const database = db; // Local capture for TS narrowing
+    const database = db; 
     const userRef = ref(database, `lobby/${user.username}`);
     set(userRef, {
         ...user,

@@ -299,14 +299,14 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
              : [...prev.player2History, guessResult];
 
           let nextPhase = isOpponentP1 ? GamePhase.TURN_P2 : GamePhase.TURN_P1;
-          let winner = null;
+          let winner: string | null = null;
           let msgText = isPlayer1 ? 'Your Turn!' : 'Opponent\'s Turn';
 
           if (result.on === n && result.order === n) {
              nextPhase = GamePhase.GAME_OVER;
              winner = isPlayer1 ? 'player1' : 'player2';
              msgText = 'You Lost!';
-             saveHistory(winner as string | null, prev);
+             saveHistory(winner, prev);
              clearActiveSession();
           } else {
              if (isPlayer1) msgText = "Your Turn!"; 
@@ -318,7 +318,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
             player1History: isOpponentP1 ? newHistory : prev.player1History,
             player2History: !isPlayer1 ? newHistory : prev.player2History,
             phase: nextPhase,
-            winner: winner as string | null,
+            winner: winner,
             message: msgText
           };
         });
@@ -502,7 +502,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
              : [...prev.player2History, guessResult];
           
           let nextPhase = isPlayer1 ? GamePhase.TURN_P2 : GamePhase.TURN_P1;
-          let winner = null;
+          let winner: string | null = null;
           let msgText = "Opponent's Turn";
 
           if (result.on === n && result.order === n) {
@@ -518,7 +518,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
              player1History: isPlayer1 ? newHistory : prev.player1History,
              player2History: !isPlayer1 ? newHistory : prev.player2History,
              phase: nextPhase,
-             winner: winner as string | null,
+             winner: winner,
              message: msgText
           };
        });
@@ -619,7 +619,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
           ...prev,
           player2History: newP2History,
           phase: nextPhase,
-          winner: winner as string | null,
+          winner: winner,
           message: msg
         };
       });
