@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameConfig, GameState, GameMode, GuessResult, GamePhase, User } from '../types';
 import { validateSequence, computeOnAndOrder, generateRandomSecret } from '../utils/gameLogic';
-import { NetworkAdapter, saveMatchRecord, saveActiveSession, clearActiveSession, getActiveSession } from '../utils/storage';
+import { saveMatchRecord, saveActiveSession, clearActiveSession, getActiveSession } from '../utils/storage';
+import { NetworkAdapter } from '../utils/network';
 import Keypad from '../components/Keypad';
 import InputDisplay from '../components/InputDisplay';
 import MoveHistory from '../components/MoveHistory';
@@ -64,10 +65,11 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
 
   // Network Ref
   const networkRef = useRef<NetworkAdapter | null>(null);
+  
+  // Used to prevent processing our own messages if they bounce back
+  const lastProcessedMsgId = useRef<string>('');
 
   // --- Persistence Effect ---
-  // Note: We don't save timeLeft here on every tick to avoid perf issues. 
-  // We save it explicitly on Pause.
   useEffect(() => {
     saveActiveSession(gameState);
   }, [gameState]);
@@ -76,20 +78,23 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   useEffect(() => {
     if (isOnline && config.matchCode) {
       const net = new NetworkAdapter(config.matchCode, (msg: any) => {
-        handleNetworkMessage(msg);
+         // Dedup check logic if needed, but sender check handles most
+         if (msg.senderId === lastProcessedMsgId.current) return;
+         handleNetworkMessage(msg);
       });
       networkRef.current = net;
 
-      // On connect/refresh, request sync to get latest state from opponent if we missed anything
-      setTimeout(() => {
+      // On connect/refresh, request sync
+      const initTimeout = setTimeout(() => {
          net.send('SYNC_REQUEST', { from: user.username });
-         // Also send JOIN if strictly needed, but SYNC handles state recovery better
+         // Also send JOIN if strictly needed
          if (!isHost && gameState.player1History.length === 0 && gameState.phase === GamePhase.WAITING_FOR_OPPONENT) {
             net.send('PLAYER_JOINED', { username: user.username });
          }
-      }, 500);
+      }, 1000); // Slight delay for connection
 
       return () => {
+        clearTimeout(initTimeout);
         net.cleanup();
       };
     }
@@ -113,8 +118,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
     return false;
   };
 
-  // Reset timer when turn changes (detected by history length change or phase change)
-  // We use refs to check if actual change happened to avoid resetting on resume (mount)
+  // Reset timer when turn changes
   useEffect(() => {
     const phaseChanged = gameState.phase !== prevPhase.current;
     const movesChanged = gameState.player1History.length !== prevP1Moves.current || 
@@ -131,8 +135,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
 
   // Countdown
   useEffect(() => {
-    // Condition: Timer only starts after both players have moved at least once
-    // (Warmup round is untimed)
     const warmupComplete = gameState.player1History.length > 0 && gameState.player2History.length > 0;
 
     if (!isMyTurn() || !warmupComplete) return;
@@ -152,27 +154,25 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   }, [gameState.phase, isOnline, isPlayer1, isSinglePlayer, isAiThinking, gameState.player1History.length, gameState.player2History.length]);
 
   const handleTimeout = () => {
-    // Logic: Pass by setting current guess match with last recent guess
     const myHistory = isPlayer1 ? gameState.player1History : gameState.player2History;
     
     let fallbackGuess = '';
     if (myHistory.length > 0) {
       fallbackGuess = myHistory[myHistory.length - 1].guess;
     } else {
-      // No previous guess, generate random valid one to keep game moving
       fallbackGuess = generateRandomSecret(gameState.config.n);
     }
-    
-    // Auto submit
     submitGuess(fallbackGuess);
   };
 
   const handleNetworkMessage = (msg: any) => {
-    if (msg.sender === user.username) return; 
+    if (msg.payload && msg.payload.username === user.username) return; // Extra check for self
+    if (msg.payload && msg.payload.from === user.username) return; 
+
+    // console.log("Received Msg", msg);
 
     switch (msg.type) {
       case 'SYNC_REQUEST':
-        // Send state including names
         networkRef.current?.send('SYNC_RESPONSE', {
             phase: gameState.phase,
             p1Secret: gameState.player1Secret,
@@ -181,15 +181,13 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
             p2History: gameState.player2History,
             configN: gameState.config.n,
             configTime: gameState.config.timeLimit,
-            // If I am P1, I am host, my name is P1 name
-            opponentName: user.username // Send MY name so opponent knows who they are playing
+            opponentName: user.username 
         });
         break;
 
       case 'SYNC_RESPONSE':
         setGameState(prev => {
             const remote = msg.payload;
-            
             const newP1History = remote.p1History.length > prev.player1History.length ? remote.p1History : prev.player1History;
             const newP2History = remote.p2History.length > prev.player2History.length ? remote.p2History : prev.player2History;
             
@@ -229,7 +227,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
 
       case 'PLAYER_JOINED':
         if (isHost && gameState.phase === GamePhase.WAITING_FOR_OPPONENT) {
-          // Send Config AND Host Name
           networkRef.current?.send('GAME_START_CONFIG', { 
               n: config.n, 
               timeLimit: config.timeLimit,
@@ -288,6 +285,11 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
       case 'GUESS_MADE':
         setGameState(prev => {
           const guess = msg.payload.guess;
+          const isOpponentP1 = msg.payload.isPlayer1;
+          
+          // Logic to avoid double processing if sync handles it
+          // But sync is usually delayed.
+          
           const targetSecret = isPlayer1 ? prev.player1Secret : prev.player2Secret; 
           const result = computeOnAndOrder(targetSecret, guess);
           
@@ -298,7 +300,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
              timestamp: new Date().toISOString()
           };
 
-          const isOpponentP1 = msg.payload.isPlayer1;
           const newHistory = isOpponentP1 
              ? [...prev.player1History, guessResult]
              : [...prev.player2History, guessResult];
@@ -491,11 +492,11 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
 
     if (isOnline) {
        networkRef.current?.send('GUESS_MADE', { guess: guessToSubmit, isPlayer1 });
-       
        setGameState(prev => {
+          // Optimistic update
           const targetSecret = isPlayer1 ? prev.player2Secret : prev.player1Secret;
           const result = computeOnAndOrder(targetSecret, guessToSubmit);
-
+          
           const guessResult: GuessResult = {
              guess: guessToSubmit,
              on: result.on,
@@ -639,8 +640,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
         if (!isHost) {
              networkRef.current.send('PLAYER_JOINED', { username: user.username });
         }
-    } else {
-      console.log("Local Refresh Triggered");
     }
   };
 
@@ -732,7 +731,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
     }
   }
 
-  const isLocalMode = !isOnline;
   const isGameOver = gameState.phase === GamePhase.GAME_OVER;
   
   const handleMainAction = () => {

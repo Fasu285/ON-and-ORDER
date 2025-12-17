@@ -41,6 +41,20 @@ export interface User {
   contact: string; // Email or Phone
 }
 
+export interface LobbyUser {
+  username: string;
+  n: number;
+  timeLimit: number;
+  status: 'IDLE' | 'PLAYING';
+  lastSeen: number;
+}
+
+export interface Invite {
+  from: string;
+  matchCode: string;
+  config: GameConfig;
+}
+
 export interface MatchRecord {
   id: string;
   timestamp: string;
