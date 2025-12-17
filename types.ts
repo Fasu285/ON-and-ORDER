@@ -78,7 +78,7 @@ export interface GameState {
   player2History: GuessResult[]; // P2 guesses against P1 Secret
   
   message?: string;
-  winner?: 'player1' | 'player2' | 'draw' | null;
+  winner?: string | null; // Changed from specific union to string to prevent type errors
   opponentName?: string; // Persisted name of the opponent
   timeLeft?: number; // Saved time for resume
 }

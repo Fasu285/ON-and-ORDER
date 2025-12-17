@@ -60,7 +60,8 @@ export class NetworkAdapter {
 
 export const joinLobby = (user: LobbyUser) => {
     if (!db) return;
-    const userRef = ref(db, `lobby/${user.username}`);
+    const database = db; // Local capture for TS narrowing
+    const userRef = ref(database, `lobby/${user.username}`);
     set(userRef, {
         ...user,
         lastSeen: Date.now()
@@ -71,13 +72,15 @@ export const joinLobby = (user: LobbyUser) => {
 
 export const leaveLobby = (username: string) => {
     if (!db) return;
-    const userRef = ref(db, `lobby/${username}`);
+    const database = db;
+    const userRef = ref(database, `lobby/${username}`);
     remove(userRef);
 };
 
 export const listenToLobby = (callback: (users: LobbyUser[]) => void) => {
     if (!db) return () => {};
-    const lobbyRef = ref(db, 'lobby');
+    const database = db;
+    const lobbyRef = ref(database, 'lobby');
     return onValue(lobbyRef, (snapshot) => {
         const val = snapshot.val();
         const users: LobbyUser[] = [];
@@ -92,7 +95,8 @@ export const listenToLobby = (callback: (users: LobbyUser[]) => void) => {
 
 export const sendInvite = (toUser: string, fromUser: string, matchCode: string, config: any) => {
     if (!db) return;
-    const inviteRef = ref(db, `invites/${toUser}/${fromUser}`);
+    const database = db;
+    const inviteRef = ref(database, `invites/${toUser}/${fromUser}`);
     set(inviteRef, {
         from: fromUser,
         matchCode,
@@ -103,7 +107,8 @@ export const sendInvite = (toUser: string, fromUser: string, matchCode: string, 
 
 export const listenForInvites = (username: string, callback: (invite: any) => void) => {
     if (!db) return () => {};
-    const invitesRef = ref(db, `invites/${username}`);
+    const database = db;
+    const invitesRef = ref(database, `invites/${username}`);
     return onValue(invitesRef, (snapshot) => {
         const val = snapshot.val();
         if (val) {
@@ -112,7 +117,7 @@ export const listenForInvites = (username: string, callback: (invite: any) => vo
             const invite = val[firstKey];
             callback(invite);
             // Auto clear invite after receiving
-            remove(ref(db, `invites/${username}/${firstKey}`));
+            remove(ref(database, `invites/${username}/${firstKey}`));
         }
     });
 };

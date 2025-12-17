@@ -306,7 +306,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
              nextPhase = GamePhase.GAME_OVER;
              winner = isPlayer1 ? 'player1' : 'player2';
              msgText = 'You Lost!';
-             saveHistory(winner, prev);
+             saveHistory(winner as string | null, prev);
              clearActiveSession();
           } else {
              if (isPlayer1) msgText = "Your Turn!"; 
@@ -318,7 +318,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
             player1History: isOpponentP1 ? newHistory : prev.player1History,
             player2History: !isPlayer1 ? newHistory : prev.player2History,
             phase: nextPhase,
-            winner,
+            winner: winner as string | null,
             message: msgText
           };
         });
@@ -326,7 +326,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
     }
   };
 
-  const saveHistory = (winner: 'player1' | 'player2' | 'draw' | null, finalState: GameState) => {
+  const saveHistory = (winner: string | null, finalState: GameState) => {
     let winnerStr = "Draw";
     const oppName = finalState.opponentName || "Opponent";
 
@@ -518,7 +518,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
              player1History: isPlayer1 ? newHistory : prev.player1History,
              player2History: !isPlayer1 ? newHistory : prev.player2History,
              phase: nextPhase,
-             winner,
+             winner: winner as string | null,
              message: msgText
           };
        });
@@ -619,7 +619,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
           ...prev,
           player2History: newP2History,
           phase: nextPhase,
-          winner,
+          winner: winner as string | null,
           message: msg
         };
       });
