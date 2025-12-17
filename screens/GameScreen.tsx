@@ -82,22 +82,22 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
       if (connectionInterval.current) clearInterval(connectionInterval.current);
 
       connectionInterval.current = setInterval(() => {
-          // If we are waiting for opponent (Host or Guest)
+          // Handshake Loop
           if (gameState.phase === GamePhase.WAITING_FOR_OPPONENT) {
-             // Guest: Spam PLAYER_JOINED until accepted (Game Started)
              if (!isHost) {
+                 // Guest: Spam PLAYER_JOINED until accepted. 
+                 // Do NOT send SYNC_REQUEST here to avoid overwriting PLAYER_JOINED in a race condition.
                  net.send('PLAYER_JOINED', { username: user.username });
-             }
-             // Both: Request Sync to catch up state
-             net.send('SYNC_REQUEST', { from: user.username });
+             } 
+             // Host: Just listen.
           } else {
-             // Once game started, stop spamming handshake
-             if (connectionInterval.current) {
-                 clearInterval(connectionInterval.current);
-                 connectionInterval.current = null;
+             // Game Started
+             // Occasional sync to ensure consistency (every ~10s approx)
+             if (Math.random() < 0.2) { 
+                 net.send('SYNC_REQUEST', { from: user.username });
              }
           }
-      }, 2000); // Retry every 2 seconds
+      }, 2000); 
 
       return () => {
         if (connectionInterval.current) clearInterval(connectionInterval.current);
@@ -175,19 +175,9 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
 
     switch (msg.type) {
       case 'SYNC_REQUEST':
-        // Only Host needs to respond to Sync Requests generally, but p2p can echo
+        // Only Host needs to respond to Sync Requests generally
         if (isHost || gameState.phase !== GamePhase.WAITING_FOR_OPPONENT) {
-            networkRef.current?.send('SYNC_RESPONSE', {
-                phase: gameState.phase,
-                p1Secret: gameState.player1Secret,
-                p2Secret: gameState.player2Secret,
-                p1History: gameState.player1History,
-                p2History: gameState.player2History,
-                configN: gameState.config.n,
-                configTime: gameState.config.timeLimit,
-                opponentName: isHost ? gameState.opponentName : user.username, // Send known opponent name
-                hostName: isHost ? user.username : undefined
-            });
+            sendSyncResponse();
         }
         break;
 
@@ -255,13 +245,19 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
         break;
 
       case 'PLAYER_JOINED':
-        if (isHost && gameState.phase === GamePhase.WAITING_FOR_OPPONENT) {
-          // Just update the UI to show opponent is here, DO NOT auto start
-          setGameState(prev => ({
-            ...prev,
-            opponentName: msg.payload.username,
-            message: `${msg.payload.username} Joined! Ready to start.`
-          }));
+        if (isHost) {
+          if (gameState.phase === GamePhase.WAITING_FOR_OPPONENT) {
+             // Just update the UI to show opponent is here, DO NOT auto start
+             setGameState(prev => ({
+               ...prev,
+               opponentName: msg.payload.username,
+               message: `${msg.payload.username} Joined! Ready to start.`
+             }));
+          } else {
+             // If we already started and guest is joining (re-join/late), help them catch up
+             // Send full sync response
+             sendSyncResponse();
+          }
         }
         break;
       
@@ -353,6 +349,20 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
         });
         break;
     }
+  };
+
+  const sendSyncResponse = () => {
+      networkRef.current?.send('SYNC_RESPONSE', {
+        phase: gameState.phase,
+        p1Secret: gameState.player1Secret,
+        p2Secret: gameState.player2Secret,
+        p1History: gameState.player1History,
+        p2History: gameState.player2History,
+        configN: gameState.config.n,
+        configTime: gameState.config.timeLimit,
+        opponentName: isHost ? gameState.opponentName : user.username, 
+        hostName: isHost ? user.username : undefined
+    });
   };
 
   // --- Host Start Game Action ---
