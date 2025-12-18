@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import HomeScreen from './screens/HomeScreen';
 import GameScreen from './screens/GameScreen';
@@ -72,6 +73,17 @@ const App: React.FC = () => {
     setCurrentScreen('game');
   };
 
+  // Fix: Added handleRestartGame to handle play again functionality
+  const handleRestartGame = (config: GameConfig) => {
+    clearActiveSession();
+    // Setting config to null briefly to force a full re-render of GameScreen
+    setGameConfig(null);
+    setTimeout(() => {
+      setGameConfig(config);
+      setCurrentScreen('game');
+    }, 0);
+  };
+
   const handleResumeGame = () => {
     const session = getActiveSession();
     if (session) {
@@ -108,7 +120,13 @@ const App: React.FC = () => {
         />
       )}
       {currentScreen === 'game' && gameConfig && user && (
-        <GameScreen config={gameConfig} user={user} onExit={handleExitGame} />
+        // Fix: Passed missing onRestart prop to GameScreen component
+        <GameScreen 
+          config={gameConfig} 
+          user={user} 
+          onExit={handleExitGame} 
+          onRestart={handleRestartGame} 
+        />
       )}
       {currentScreen === 'history' && (
         <MatchHistoryScreen onBack={handleBackToHome} />

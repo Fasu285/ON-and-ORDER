@@ -42,11 +42,13 @@ const App: React.FC = () => {
        setCurrentScreen('game');
     }
 
-    document.body.addEventListener('touchmove', function(e) {
+    const preventTouch = function(e: TouchEvent) {
         if (e.target === document.body) {
              e.preventDefault();
         }
-    }, { passive: false });
+    };
+    document.body.addEventListener('touchmove', preventTouch, { passive: false });
+    return () => document.body.removeEventListener('touchmove', preventTouch);
   }, []);
 
   const handleLogin = (newUser: User) => {
@@ -70,6 +72,16 @@ const App: React.FC = () => {
     clearActiveSession(); // Clear any previous session
     setGameConfig(config);
     setCurrentScreen('game');
+  };
+
+  const handleRestartGame = (config: GameConfig) => {
+    clearActiveSession();
+    // Setting config to null briefly to force a full re-render of GameScreen
+    setGameConfig(null);
+    setTimeout(() => {
+      setGameConfig(config);
+      setCurrentScreen('game');
+    }, 0);
   };
 
   const handleResumeGame = () => {
@@ -108,7 +120,12 @@ const App: React.FC = () => {
         />
       )}
       {currentScreen === 'game' && gameConfig && user && (
-        <GameScreen config={gameConfig} user={user} onExit={handleExitGame} />
+        <GameScreen 
+          config={gameConfig} 
+          user={user} 
+          onExit={handleExitGame} 
+          onRestart={handleRestartGame} 
+        />
       )}
       {currentScreen === 'history' && (
         <MatchHistoryScreen onBack={handleBackToHome} />

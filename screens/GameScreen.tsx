@@ -11,6 +11,7 @@ interface GameScreenProps {
   config: GameConfig;
   user: User;
   onExit: () => void;
+  onRestart: (config: GameConfig) => void;
 }
 
 const getAllPermutations = (n: number): string[] => {
@@ -32,7 +33,7 @@ const getAllPermutations = (n: number): string[] => {
   return results;
 };
 
-const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
+const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart }) => {
   const [input, setInput] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [showResultModal, setShowResultModal] = useState(false);
@@ -41,7 +42,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   
   const [gameState, setGameState] = useState<GameState>(() => {
     const saved = getActiveSession();
-    if (saved && saved.config.mode === config.mode) return saved;
+    if (saved && saved.config.mode === config.mode && saved.phase !== GamePhase.GAME_OVER) return saved;
     
     return {
       matchId: 'match-' + Date.now(),
@@ -64,7 +65,9 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
 
   // Persistence
   useEffect(() => {
-    saveActiveSession(gameState);
+    if (gameState.phase !== GamePhase.GAME_OVER) {
+      saveActiveSession(gameState);
+    }
     if (gameState.phase === GamePhase.GAME_OVER && !showResultModal && !isReviewingHistory && gameState.winner !== null) {
       setShowResultModal(true);
     }
@@ -77,10 +80,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
         setGameState(prev => {
           if (prev.timeLeft !== undefined && prev.timeLeft > 0) {
             return { ...prev, timeLeft: prev.timeLeft - 1 };
-          } else {
-            // Time up! Skip turn
-            return prev;
           }
+          return prev;
         });
       }, 1000);
     } else {
@@ -166,15 +167,13 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
 
         const n = prev.config.n;
         const history = prev.player2History;
-        let candidates: string[] = [];
         let aiGuess: string = '';
 
         if (history.length === 0) {
           aiGuess = n === 4 ? '0123' : (n === 3 ? '012' : '01');
-          candidates = [aiGuess];
         } else {
           const all = getAllPermutations(n);
-          candidates = all.filter(p => {
+          const candidates = all.filter(p => {
             return history.every(move => {
               const sim = computeOnAndOrder(p, move.guess);
               return sim.on === move.on && sim.order === move.order;
@@ -215,7 +214,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
         return { ...prev, message: `CPU guessed ${aiGuess}...` };
       });
     }, 1000);
-  }, []);
+  }, [config.timeLimit]);
 
   const submitGuess = () => {
     const isP1 = gameState.phase === GamePhase.TURN_P1;
@@ -270,6 +269,10 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   const isSetup = gameState.phase.startsWith('SETUP');
   const isWinner = gameState.winner === user.username;
 
+  const handlePlayAgain = () => {
+    onRestart(config);
+  };
+
   return (
     <div className="flex flex-col h-full bg-gray-50 overflow-hidden relative">
       {/* Result Modal Overlay */}
@@ -302,11 +305,14 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
             </div>
 
             <div className="w-full space-y-3">
-              <Button fullWidth onClick={onExit} variant="primary" className="h-14 !text-lg shadow-lg">
+              <Button fullWidth onClick={handlePlayAgain} variant="primary" className="h-14 !text-lg shadow-lg">
                 PLAY AGAIN
               </Button>
-              <Button fullWidth onClick={() => { setShowResultModal(false); setIsReviewingHistory(true); }} variant="ghost" className="h-10 text-xs font-black uppercase tracking-widest">
+              <Button fullWidth onClick={() => { setShowResultModal(false); setIsReviewingHistory(true); }} variant="secondary" className="h-12 text-sm font-black uppercase tracking-widest">
                 Review History
+              </Button>
+              <Button fullWidth onClick={onExit} variant="ghost" className="h-10 text-xs font-bold text-gray-400 uppercase tracking-widest">
+                Main Menu
               </Button>
             </div>
           </div>
@@ -316,7 +322,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
       {/* Header */}
       <div className="bg-white border-b border-gray-200 p-4 shadow-sm z-10 flex-none relative">
         <div className="flex justify-between items-center mb-1">
-          <Button variant="ghost" onClick={onExit} className="!p-0 !min-h-0 text-gray-400 text-xs font-black">EXIT</Button>
+          <Button variant="ghost" onClick={onExit} className="!p-0 !min-h-0 text-gray-400 text-xs font-black uppercase">Menu</Button>
           <div className="flex flex-col items-end">
             <div className="text-[10px] font-black text-gray-400 tracking-widest uppercase">
               {config.mode} • {config.n}N
@@ -378,12 +384,13 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
       {/* Review History / Game Over state */}
       {(gameState.phase === GamePhase.GAME_OVER || isReviewingHistory) && (
         <div className="p-6 bg-white border-t border-gray-200 flex flex-col gap-3 pb-safe">
-          <Button fullWidth onClick={onExit} variant="primary" className="h-14 !text-lg shadow-md uppercase tracking-tighter">
+          <Button fullWidth onClick={handlePlayAgain} variant="primary" className="h-14 !text-lg shadow-md uppercase tracking-tighter">
             Play Again
           </Button>
-          {gameState.phase === GamePhase.GAME_OVER && !showResultModal && (
-             <Button fullWidth variant="ghost" onClick={() => setShowResultModal(true)} className="text-xs font-black uppercase tracking-widest">VIEW RESULT CARD</Button>
+          {(gameState.phase === GamePhase.GAME_OVER || isReviewingHistory) && !showResultModal && (
+             <Button fullWidth variant="ghost" onClick={() => setShowResultModal(true)} className="text-xs font-black uppercase tracking-widest">View Result Card</Button>
           )}
+          <Button fullWidth variant="ghost" onClick={onExit} className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Exit to Menu</Button>
         </div>
       )}
     </div>
