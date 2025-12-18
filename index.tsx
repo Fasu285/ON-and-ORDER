@@ -1,3 +1,12 @@
+// This forces any existing service worker to unregister and clear itself
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    for (let registration of registrations) {
+      registration.unregister();
+    }
+  });
+}
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './src/App';
