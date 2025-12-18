@@ -1,5 +1,12 @@
-import { initializeApp } from "firebase/app";
-import { getDatabase, Database } from "firebase/database";
+
+import * as firebaseApp from "firebase/app";
+import * as firebaseDatabase from "firebase/database";
+// Use import type for types to avoid "no exported member" errors for values
+import type { Database } from "firebase/database";
+
+// Destructure from namespaced imports to fix resolution issues in some environments
+const { initializeApp } = firebaseApp;
+const { getDatabase } = firebaseDatabase;
 
 // Helper to safely access env vars in Vite
 const getEnv = (key: string) => {

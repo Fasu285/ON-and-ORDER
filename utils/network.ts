@@ -1,132 +1,91 @@
+
 import { db } from './firebase';
-import { ref, set, onValue, push, onDisconnect, remove, get, update } from 'firebase/database';
-import { LobbyUser } from '../types';
+import * as firebaseDatabase from 'firebase/database';
+import { LobbyUser, GameConfig, GameState } from '../types';
 
-type NetworkEventCallback = (data: any) => void;
+const { ref, set, onValue, remove, update, onDisconnect, get } = firebaseDatabase;
 
-export class NetworkAdapter {
-  private matchCode: string;
-  private userId: string;
-  private onMessage: NetworkEventCallback;
-  private matchRef: any;
-  private unsubscribe: (() => void) | null = null;
+/**
+ * Updates the global lobby with the host's match info.
+ */
+export const updateLobby = (user: LobbyUser, matchCode: string) => {
+  if (!db) return;
+  const lobbyRef = ref(db, `lobby/${user.username}`);
+  set(lobbyRef, {
+    username: user.username,
+    config: { n: user.n, timeLimit: user.timeLimit },
+    matchCode,
+    lastSeen: Date.now()
+  });
+  // Auto-remove if host disconnects
+  onDisconnect(lobbyRef).remove();
+};
 
-  constructor(matchCode: string, userId: string, onMessage: NetworkEventCallback) {
-    this.matchCode = matchCode;
-    this.userId = userId;
-    this.onMessage = onMessage;
-    
-    if (db) {
-      this.matchRef = ref(db, `matches/${matchCode}`);
-      // Listen for updates
-      this.unsubscribe = onValue(this.matchRef, (snapshot) => {
-        const val = snapshot.val();
-        if (val && val.lastMessage) {
-          // Process message if it exists. 
-          // 1. Timestamp check: reasonably recent (within last 60s)
-          // 2. Sender check: ignore messages from self (echo)
-          if (val.lastMessage.from !== this.userId && val.lastMessage.timestamp > (Date.now() - 60000)) {
-             this.onMessage(val.lastMessage);
-          }
-        }
+/**
+ * Removes a player from the lobby.
+ */
+export const clearLobby = (username: string) => {
+  if (!db) return;
+  remove(ref(db, `lobby/${username}`));
+};
+
+/**
+ * Joins an existing match by updating metadata.
+ */
+export const joinMatch = async (matchCode: string, guestName: string) => {
+  if (!db) return null;
+  const matchRef = ref(db, `matches/${matchCode}`);
+  const snapshot = await get(matchRef);
+  
+  if (snapshot.exists()) {
+    const data = snapshot.val();
+    // Only join if match isn't full or if re-joining
+    if (!data.metadata.guest || data.metadata.guest === guestName) {
+      await update(ref(db, `matches/${matchCode}/metadata`), { 
+        guest: guestName,
+        joinedAt: Date.now()
       });
+      // Once joined, remove from public lobby
+      if (data.metadata.host) {
+        clearLobby(data.metadata.host);
+      }
+      return data.metadata.config;
     }
   }
+  return null;
+};
 
-  public send(type: string, payload: any) {
-    if (!db) return;
-    
-    const message = { 
-        type, 
-        payload, 
-        timestamp: Date.now(), 
-        from: this.userId 
-    };
+/**
+ * Synchronizes the game state node.
+ */
+export const syncGameStateNode = (matchCode: string, state: any) => {
+  if (!db) return;
+  update(ref(db, `matches/${matchCode}/state`), {
+    ...state,
+    lastUpdate: Date.now()
+  });
+};
 
-    set(this.matchRef, {
-        lastMessage: message,
-        updatedAt: Date.now()
-    });
-  }
-
-  public cleanup() {
-    if (this.unsubscribe) {
-        this.unsubscribe(); // Stop listening
+/**
+ * Initializes a new match container.
+ */
+export const initMatchNode = async (matchCode: string, hostName: string, config: GameConfig) => {
+  if (!db) return;
+  const matchRef = ref(db, `matches/${matchCode}`);
+  await set(matchRef, {
+    metadata: {
+      host: hostName,
+      guest: null,
+      config: { n: config.n, timeLimit: config.timeLimit },
+      createdAt: Date.now()
+    },
+    state: {
+      phase: 'WAITING_FOR_OPPONENT',
+      p1Secret: '',
+      p2Secret: '',
+      p1History: [],
+      p2History: []
     }
-  }
-}
-
-// --- Lobby Functions ---
-
-export const joinLobby = (user: LobbyUser) => {
-    if (!db) return;
-    const database = db; 
-    const userRef = ref(database, `lobby/${user.username}`);
-    set(userRef, {
-        ...user,
-        lastSeen: Date.now()
-    });
-    // Auto remove if they close browser
-    onDisconnect(userRef).remove();
-};
-
-export const updateHeartbeat = (username: string) => {
-    if (!db) return;
-    const database = db;
-    const userRef = ref(database, `lobby/${username}`);
-    update(userRef, {
-        lastSeen: Date.now()
-    });
-};
-
-export const leaveLobby = (username: string) => {
-    if (!db) return;
-    const database = db;
-    const userRef = ref(database, `lobby/${username}`);
-    remove(userRef);
-};
-
-export const listenToLobby = (callback: (users: LobbyUser[]) => void) => {
-    if (!db) return () => {};
-    const database = db;
-    const lobbyRef = ref(database, 'lobby');
-    return onValue(lobbyRef, (snapshot) => {
-        const val = snapshot.val();
-        const users: LobbyUser[] = [];
-        if (val) {
-            Object.keys(val).forEach(key => {
-                users.push(val[key]);
-            });
-        }
-        callback(users);
-    });
-};
-
-export const sendInvite = (toUser: string, fromUser: string, matchCode: string, config: any) => {
-    if (!db) return;
-    const database = db;
-    const inviteRef = ref(database, `invites/${toUser}/${fromUser}`);
-    set(inviteRef, {
-        from: fromUser,
-        matchCode,
-        config,
-        timestamp: Date.now()
-    });
-};
-
-export const listenForInvites = (username: string, callback: (invite: any) => void) => {
-    if (!db) return () => {};
-    const database = db;
-    const invitesRef = ref(database, `invites/${username}`);
-    return onValue(invitesRef, (snapshot) => {
-        const val = snapshot.val();
-        if (val) {
-            // Get first invite
-            const firstKey = Object.keys(val)[0];
-            const invite = val[firstKey];
-            callback(invite);
-            // Auto clear invite after receiving
-            remove(ref(database, `invites/${username}/${firstKey}`));
-        }
-    });
+  });
+  onDisconnect(matchRef).remove();
 };
