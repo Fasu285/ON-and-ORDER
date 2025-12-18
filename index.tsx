@@ -2,23 +2,22 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './src/App';
 
-// Register Service Worker with origin check to prevent fatal error in sandboxed environments
-if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+// Register Service Worker
+if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    const swUrl = new URL('./service-worker.js', window.location.origin).href;
-    navigator.serviceWorker.register(swUrl).then(registration => {
+    navigator.serviceWorker.register('/service-worker.js').then(registration => {
+      // Check for updates automatically
       registration.onupdatefound = () => {
         const installingWorker = registration.installing;
         if (installingWorker) {
           installingWorker.onstatechange = () => {
             if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              // New content is available; force a refresh
               window.location.reload();
             }
           };
         }
       };
-    }).catch(err => {
-      console.info('Service worker registration skipped:', err.message);
     });
   });
 }
