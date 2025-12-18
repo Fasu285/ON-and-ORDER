@@ -1,3 +1,16 @@
+// Add this at the VERY TOP of index.tsx
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    for (let registration of registrations) {
+      registration.unregister().then(() => {
+        console.log('Old Service Worker nuked');
+        // Only reload if we actually found and unregistered a worker
+        window.location.reload(); 
+      });
+    }
+  });
+}
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './src/App';
