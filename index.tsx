@@ -45,29 +45,24 @@ const manageServiceWorker = () => {
         });
       }
 
-      // 2. Register current worker with relative path to avoid origin mismatch
-      // Scope is set to './' to allow the service worker to control pages in this directory and subdirectories
-      navigator.serviceWorker.register('./service-worker.js', { scope: './' })
-        .then(registration => {
-          registration.onupdatefound = () => {
-            const installingWorker = registration.installing;
-            if (installingWorker) {
-              installingWorker.onstatechange = () => {
-                if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                  console.log('New update available. Refresh to apply.');
-                }
-              };
+  if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').then(registration => {
+      // Check for updates automatically
+      registration.onupdatefound = () => {
+        const installingWorker = registration.installing;
+        if (installingWorker) {
+          installingWorker.onstatechange = () => {
+            if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              // New content is available; force a refresh
+              window.location.reload();
             }
           };
-        })
-        .catch(error => {
-          console.debug('Service Worker registration deferred or failed:', error.message);
-        });
-    } catch (e) {
-      console.debug('SW management encountered an error:', e);
-    }
+        }
+      };
+    });
   });
-};
+}
 
 // Initialize SW management
 manageServiceWorker();
