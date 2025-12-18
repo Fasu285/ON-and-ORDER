@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameConfig, GameState, GameMode, GuessResult, GamePhase, User } from '../types';
 import { validateSequence, computeOnAndOrder, generateRandomSecret } from '../utils/gameLogic';
 import { saveActiveSession, getActiveSession, clearActiveSession } from '../utils/storage';
@@ -35,7 +35,9 @@ const getAllPermutations = (n: number): string[] => {
 const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   const [input, setInput] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
-  const [showWinnerModal, setShowWinnerModal] = useState(false);
+  const [showResultModal, setShowResultModal] = useState(false);
+  const [isReviewingHistory, setIsReviewingHistory] = useState(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
   
   const [gameState, setGameState] = useState<GameState>(() => {
     const saved = getActiveSession();
@@ -50,16 +52,66 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
       player1History: [],
       player2History: [],
       message: `${user.username}, set your secret`,
-      winner: null
+      winner: null,
+      timeLeft: config.timeLimit
     };
   });
 
+  const isPlayer1Turn = gameState.phase === GamePhase.TURN_P1;
+  const isPlayer2Turn = gameState.phase === GamePhase.TURN_P2;
+  const currentHistory = isPlayer1Turn ? gameState.player1History : gameState.player2History;
+  const timerActive = (isPlayer1Turn || isPlayer2Turn) && currentHistory.length > 0 && !isAiThinking && gameState.phase !== GamePhase.GAME_OVER;
+
+  // Persistence
   useEffect(() => {
     saveActiveSession(gameState);
-    if (gameState.phase === GamePhase.GAME_OVER && !showWinnerModal && gameState.winner !== null) {
-      setShowWinnerModal(true);
+    if (gameState.phase === GamePhase.GAME_OVER && !showResultModal && !isReviewingHistory && gameState.winner !== null) {
+      setShowResultModal(true);
     }
-  }, [gameState, showWinnerModal]);
+  }, [gameState, showResultModal, isReviewingHistory]);
+
+  // Timer logic
+  useEffect(() => {
+    if (timerActive) {
+      timerRef.current = setInterval(() => {
+        setGameState(prev => {
+          if (prev.timeLeft !== undefined && prev.timeLeft > 0) {
+            return { ...prev, timeLeft: prev.timeLeft - 1 };
+          } else {
+            // Time up! Skip turn
+            return prev;
+          }
+        });
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [timerActive]);
+
+  // Auto-skip turn if timer reaches 0
+  useEffect(() => {
+    if (gameState.timeLeft === 0 && timerActive) {
+      handleTimeOut();
+    }
+  }, [gameState.timeLeft, timerActive]);
+
+  const handleTimeOut = () => {
+    setGameState(prev => {
+      const isP1 = prev.phase === GamePhase.TURN_P1;
+      const nextPhase = prev.config.mode === GameMode.SINGLE_PLAYER ? GamePhase.TURN_P1 : (isP1 ? GamePhase.TURN_P2 : GamePhase.TURN_P1);
+      return {
+        ...prev,
+        phase: nextPhase,
+        message: 'Time Up! Turn Swapped',
+        timeLeft: config.timeLimit
+      };
+    });
+    setInput('');
+    if (config.mode === GameMode.SINGLE_PLAYER) {
+      triggerAiTurn();
+    }
+  };
 
   const handleDigitPress = (digit: string) => {
     if (input.length < config.n && !input.includes(digit)) {
@@ -79,7 +131,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
             player1Secret: input,
             player2Secret: generateRandomSecret(config.n, input),
             phase: GamePhase.TURN_P1,
-            message: 'Your Turn'
+            message: 'Your Turn',
+            timeLeft: config.timeLimit
           };
         } else {
           return {
@@ -94,7 +147,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
           ...prev,
           player2Secret: input,
           phase: GamePhase.TURN_P1,
-          message: 'Player 1 Turn'
+          message: 'Player 1 Turn',
+          timeLeft: config.timeLimit
         };
       }
       return prev;
@@ -104,7 +158,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
 
   const triggerAiTurn = useCallback(() => {
     setIsAiThinking(true);
-    setGameState(prev => ({ ...prev, message: "CPU is analyzing history..." }));
+    setGameState(prev => ({ ...prev, message: "CPU is thinking..." }));
 
     setTimeout(() => {
       setGameState(prev => {
@@ -116,9 +170,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
         let aiGuess: string = '';
 
         if (history.length === 0) {
-          if (n === 4) aiGuess = '0123';
-          else if (n === 3) aiGuess = '012';
-          else aiGuess = '01';
+          aiGuess = n === 4 ? '0123' : (n === 3 ? '012' : '01');
           candidates = [aiGuess];
         } else {
           const all = getAllPermutations(n);
@@ -128,24 +180,13 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
               return sim.on === move.on && sim.order === move.order;
             });
           });
-
-          if (candidates.length > 0) {
-            aiGuess = candidates[Math.floor(Math.random() * candidates.length)];
-          } else {
-            aiGuess = generateRandomSecret(n);
-          }
+          aiGuess = candidates.length > 0 ? candidates[Math.floor(Math.random() * candidates.length)] : generateRandomSecret(n);
         }
 
-        const displayMsg = `CPU narrowed down to ${candidates.length} options...`;
-        
         setTimeout(() => {
           setGameState(inner => {
             const result = computeOnAndOrder(inner.player1Secret, aiGuess);
-            const guessResult: GuessResult = { 
-              ...result, 
-              guess: aiGuess, 
-              timestamp: new Date().toISOString() 
-            };
+            const guessResult: GuessResult = { ...result, guess: aiGuess, timestamp: new Date().toISOString() };
             const newHistory = [...inner.player2History, guessResult];
             
             let nextPhase = inner.phase;
@@ -155,7 +196,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
             if (result.order === n) {
               nextPhase = GamePhase.GAME_OVER;
               winner = 'CPU';
-              finalMsg = 'DEFEAT! Computer cracked your code.';
+              finalMsg = 'DEFEAT!';
               clearActiveSession();
             }
 
@@ -164,13 +205,14 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
               player2History: newHistory,
               phase: nextPhase,
               winner,
-              message: finalMsg
+              message: finalMsg,
+              timeLeft: config.timeLimit
             };
           });
           setIsAiThinking(false);
         }, 800);
 
-        return { ...prev, message: displayMsg };
+        return { ...prev, message: `CPU guessed ${aiGuess}...` };
       });
     }, 1000);
   }, []);
@@ -184,8 +226,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
     setGameState(prev => {
       const historyKey = isP1 ? 'player1History' : 'player2History';
       const newHistory = [...prev[historyKey], guessResult];
-      
       const won = result.order === config.n;
+      
       if (won) {
         clearActiveSession();
         return {
@@ -203,7 +245,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
         ...prev,
         [historyKey]: newHistory,
         phase: nextPhase,
-        message: config.mode === GameMode.SINGLE_PLAYER ? 'Opponent is thinking...' : `${nextPhase === GamePhase.TURN_P1 ? 'P1' : 'P2'} Turn`
+        message: config.mode === GameMode.SINGLE_PLAYER ? 'Opponent is thinking...' : `${nextPhase === GamePhase.TURN_P1 ? 'P1' : 'P2'} Turn`,
+        timeLeft: config.timeLimit
       };
     });
     
@@ -219,36 +262,39 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
       if (prev.player2Secret === '') {
         return { ...prev, phase: GamePhase.SETUP_P2, message: 'P2: Set Secret' };
       }
-      return { ...prev, phase: GamePhase.TURN_P1, message: 'Player 1 Turn' };
+      return { ...prev, phase: GamePhase.TURN_P1, message: 'Player 1 Turn', timeLeft: config.timeLimit };
     });
     setInput(''); 
   };
 
   const isSetup = gameState.phase.startsWith('SETUP');
+  const isWinner = gameState.winner === user.username;
 
   return (
     <div className="flex flex-col h-full bg-gray-50 overflow-hidden relative">
-      {/* Winner Modal Overlay */}
-      {showWinnerModal && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border-4 animate-celebrate animate-rainbow flex flex-col items-center p-8 text-center space-y-6">
-            <div className="animate-float">
-               <div className="text-6xl mb-2">🏆</div>
-               <h1 className="text-4xl font-black text-gray-900 tracking-tighter">BOOM!</h1>
+      {/* Result Modal Overlay */}
+      {showResultModal && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-black/70 backdrop-blur-md animate-fade-in">
+          <div className={`bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border-4 flex flex-col items-center p-8 text-center space-y-6 ${isWinner ? 'animate-celebrate animate-rainbow' : 'animate-shake border-gray-300 shadow-red-500/20'}`}>
+            <div className={isWinner ? 'animate-float' : ''}>
+               <div className="text-6xl mb-2">{isWinner ? '🏆' : '💀'}</div>
+               <h1 className={`text-4xl font-black tracking-tighter ${isWinner ? 'text-gray-900' : 'text-red-600 uppercase'}`}>
+                 {isWinner ? 'BOOM!' : 'CRACKED!'}
+               </h1>
             </div>
             
             <div className="space-y-1">
-              <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">Victory for</p>
-              <p className="text-3xl font-black text-blue-600 truncate max-w-full">
+              <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">{isWinner ? 'Victory for' : 'Defeat by'}</p>
+              <p className={`text-3xl font-black truncate max-w-full ${isWinner ? 'text-blue-600' : 'text-gray-900'}`}>
                 {gameState.winner}
               </p>
             </div>
 
             <div className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Secret Code Revealed</p>
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">The Secret Was</p>
               <div className="flex justify-center gap-2">
-                {(gameState.winner === user.username ? gameState.player2Secret : gameState.player1Secret).split('').map((char, i) => (
-                  <div key={i} className="w-10 h-12 bg-white border-2 border-blue-100 rounded-lg flex items-center justify-center text-2xl font-black text-gray-800 shadow-sm">
+                {(isWinner ? gameState.player2Secret : gameState.player1Secret).split('').map((char, i) => (
+                  <div key={i} className="w-10 h-12 bg-white border-2 border-gray-200 rounded-lg flex items-center justify-center text-2xl font-black text-gray-800 shadow-sm">
                     {char}
                   </div>
                 ))}
@@ -259,7 +305,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
               <Button fullWidth onClick={onExit} variant="primary" className="h-14 !text-lg shadow-lg">
                 PLAY AGAIN
               </Button>
-              <Button fullWidth onClick={() => setShowWinnerModal(false)} variant="ghost" className="h-10 text-xs font-black uppercase tracking-widest">
+              <Button fullWidth onClick={() => { setShowResultModal(false); setIsReviewingHistory(true); }} variant="ghost" className="h-10 text-xs font-black uppercase tracking-widest">
                 Review History
               </Button>
             </div>
@@ -267,11 +313,19 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
         </div>
       )}
 
-      <div className="bg-white border-b border-gray-200 p-4 shadow-sm z-10 flex-none">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 p-4 shadow-sm z-10 flex-none relative">
         <div className="flex justify-between items-center mb-1">
           <Button variant="ghost" onClick={onExit} className="!p-0 !min-h-0 text-gray-400 text-xs font-black">EXIT</Button>
-          <div className="text-[10px] font-black text-gray-400 tracking-widest uppercase">
-            {config.mode} • {config.n}N
+          <div className="flex flex-col items-end">
+            <div className="text-[10px] font-black text-gray-400 tracking-widest uppercase">
+              {config.mode} • {config.n}N
+            </div>
+            {timerActive && (
+              <div className={`text-xs font-black px-2 rounded-full ${gameState.timeLeft! <= 10 ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 text-gray-600'}`}>
+                {gameState.timeLeft}S
+              </div>
+            )}
           </div>
         </div>
         <h2 className={`text-2xl font-black text-gray-900 leading-none transition-opacity ${isAiThinking ? 'opacity-50' : 'opacity-100'}`}>
@@ -279,6 +333,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
         </h2>
       </div>
 
+      {/* Game Content */}
       <div className="flex-1 flex flex-row overflow-hidden relative">
         {gameState.phase === GamePhase.TRANSITION ? (
           <div className="w-full flex flex-col items-center justify-center p-8 text-center bg-blue-600 text-white">
@@ -302,7 +357,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
         )}
       </div>
 
-      {gameState.phase !== GamePhase.TRANSITION && gameState.phase !== GamePhase.GAME_OVER && (
+      {/* Bottom Area */}
+      {gameState.phase !== GamePhase.TRANSITION && gameState.phase !== GamePhase.GAME_OVER && !isReviewingHistory && (
         <div className="bg-white border-t border-gray-200 p-2 pb-safe flex-none">
           <InputDisplay length={config.n} value={input} isSecret={isSetup} />
           <Keypad 
@@ -319,11 +375,14 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
         </div>
       )}
 
-      {gameState.phase === GamePhase.GAME_OVER && (
-        <div className="p-6 bg-white border-t border-gray-200 flex gap-2">
-          <Button fullWidth onClick={onExit}>NEW MATCH</Button>
-          {!showWinnerModal && (
-             <Button fullWidth variant="secondary" onClick={() => setShowWinnerModal(true)}>VIEW RECAP</Button>
+      {/* Review History / Game Over state */}
+      {(gameState.phase === GamePhase.GAME_OVER || isReviewingHistory) && (
+        <div className="p-6 bg-white border-t border-gray-200 flex flex-col gap-3 pb-safe">
+          <Button fullWidth onClick={onExit} variant="primary" className="h-14 !text-lg shadow-md uppercase tracking-tighter">
+            Play Again
+          </Button>
+          {gameState.phase === GamePhase.GAME_OVER && !showResultModal && (
+             <Button fullWidth variant="ghost" onClick={() => setShowResultModal(true)} className="text-xs font-black uppercase tracking-widest">VIEW RESULT CARD</Button>
           )}
         </div>
       )}
