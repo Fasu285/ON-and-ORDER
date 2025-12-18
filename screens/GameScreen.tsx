@@ -1,8 +1,6 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { GameConfig, GameState, GameMode, GuessResult, GamePhase, User } from '../types';
 import { validateSequence, computeOnAndOrder, generateRandomSecret } from '../utils/gameLogic';
-// Import clearActiveSession to fix the compilation error on line 168
 import { saveActiveSession, getActiveSession, clearActiveSession } from '../utils/storage';
 import Keypad from '../components/Keypad';
 import InputDisplay from '../components/InputDisplay';
@@ -15,9 +13,6 @@ interface GameScreenProps {
   onExit: () => void;
 }
 
-/**
- * Generates all valid permutations of length N with unique digits.
- */
 const getAllPermutations = (n: number): string[] => {
   const results: string[] = [];
   const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
@@ -40,6 +35,7 @@ const getAllPermutations = (n: number): string[] => {
 const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   const [input, setInput] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
+  const [showWinnerModal, setShowWinnerModal] = useState(false);
   
   const [gameState, setGameState] = useState<GameState>(() => {
     const saved = getActiveSession();
@@ -60,7 +56,10 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
 
   useEffect(() => {
     saveActiveSession(gameState);
-  }, [gameState]);
+    if (gameState.phase === GamePhase.GAME_OVER && !showWinnerModal && gameState.winner !== null) {
+      setShowWinnerModal(true);
+    }
+  }, [gameState, showWinnerModal]);
 
   const handleDigitPress = (digit: string) => {
     if (input.length < config.n && !input.includes(digit)) {
@@ -105,8 +104,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
 
   const triggerAiTurn = useCallback(() => {
     setIsAiThinking(true);
-    
-    // Phase 1: Initial Analysis
     setGameState(prev => ({ ...prev, message: "CPU is analyzing history..." }));
 
     setTimeout(() => {
@@ -118,37 +115,29 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
         let candidates: string[] = [];
         let aiGuess: string = '';
 
-        // Step 1: Openers for efficiency
         if (history.length === 0) {
           if (n === 4) aiGuess = '0123';
           else if (n === 3) aiGuess = '012';
           else aiGuess = '01';
           candidates = [aiGuess];
         } else {
-          // Step 2: Logical filtering of all possibilities
           const all = getAllPermutations(n);
           candidates = all.filter(p => {
-            // A permutation is a candidate ONLY if it would have yielded 
-            // the exact same ON/ORDER results for every previous guess.
             return history.every(move => {
               const sim = computeOnAndOrder(p, move.guess);
               return sim.on === move.on && sim.order === move.order;
             });
           });
 
-          // Step 3: Select from valid candidates
           if (candidates.length > 0) {
             aiGuess = candidates[Math.floor(Math.random() * candidates.length)];
           } else {
-            // Safety fallback (should not be reached with perfect logic)
             aiGuess = generateRandomSecret(n);
           }
         }
 
-        // Phase 2: Show result of analysis
         const displayMsg = `CPU narrowed down to ${candidates.length} options...`;
         
-        // Execute the actual guess in the next tick
         setTimeout(() => {
           setGameState(inner => {
             const result = computeOnAndOrder(inner.player1Secret, aiGuess);
@@ -165,9 +154,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
 
             if (result.order === n) {
               nextPhase = GamePhase.GAME_OVER;
-              winner = 'player2';
-              finalMsg = 'DEFEAT! AI cracked your code.';
-              // Using clearActiveSession which is now correctly imported
+              winner = 'CPU';
+              finalMsg = 'DEFEAT! Computer cracked your code.';
               clearActiveSession();
             }
 
@@ -199,6 +187,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
       
       const won = result.order === config.n;
       if (won) {
+        clearActiveSession();
         return {
           ...prev,
           [historyKey]: newHistory,
@@ -238,7 +227,46 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
   const isSetup = gameState.phase.startsWith('SETUP');
 
   return (
-    <div className="flex flex-col h-full bg-gray-50 overflow-hidden">
+    <div className="flex flex-col h-full bg-gray-50 overflow-hidden relative">
+      {/* Winner Modal Overlay */}
+      {showWinnerModal && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border-4 animate-celebrate animate-rainbow flex flex-col items-center p-8 text-center space-y-6">
+            <div className="animate-float">
+               <div className="text-6xl mb-2">🏆</div>
+               <h1 className="text-4xl font-black text-gray-900 tracking-tighter">BOOM!</h1>
+            </div>
+            
+            <div className="space-y-1">
+              <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">Victory for</p>
+              <p className="text-3xl font-black text-blue-600 truncate max-w-full">
+                {gameState.winner}
+              </p>
+            </div>
+
+            <div className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100">
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Secret Code Revealed</p>
+              <div className="flex justify-center gap-2">
+                {(gameState.winner === user.username ? gameState.player2Secret : gameState.player1Secret).split('').map((char, i) => (
+                  <div key={i} className="w-10 h-12 bg-white border-2 border-blue-100 rounded-lg flex items-center justify-center text-2xl font-black text-gray-800 shadow-sm">
+                    {char}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="w-full space-y-3">
+              <Button fullWidth onClick={onExit} variant="primary" className="h-14 !text-lg shadow-lg">
+                PLAY AGAIN
+              </Button>
+              <Button fullWidth onClick={() => setShowWinnerModal(false)} variant="ghost" className="h-10 text-xs font-black uppercase tracking-widest">
+                Review History
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white border-b border-gray-200 p-4 shadow-sm z-10 flex-none">
         <div className="flex justify-between items-center mb-1">
           <Button variant="ghost" onClick={onExit} className="!p-0 !min-h-0 text-gray-400 text-xs font-black">EXIT</Button>
@@ -292,8 +320,11 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit }) => {
       )}
 
       {gameState.phase === GamePhase.GAME_OVER && (
-        <div className="p-6 bg-white border-t border-gray-200">
+        <div className="p-6 bg-white border-t border-gray-200 flex gap-2">
           <Button fullWidth onClick={onExit}>NEW MATCH</Button>
+          {!showWinnerModal && (
+             <Button fullWidth variant="secondary" onClick={() => setShowWinnerModal(true)}>VIEW RECAP</Button>
+          )}
         </div>
       )}
     </div>

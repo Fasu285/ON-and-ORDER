@@ -27,6 +27,34 @@
       .animate-slide-in {
         animation: slideIn 0.3s ease-out forwards;
       }
+
+      /* Cheerful Winner Animations */
+      @keyframes celebrate {
+        0% { transform: scale(0.5); opacity: 0; }
+        50% { transform: scale(1.1); }
+        100% { transform: scale(1); opacity: 1; }
+      }
+      .animate-celebrate {
+        animation: celebrate 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+      }
+
+      @keyframes rainbow-border {
+        0% { border-color: #3b82f6; }
+        33% { border-color: #f97316; }
+        66% { border-color: #22c55e; }
+        100% { border-color: #3b82f6; }
+      }
+      .animate-rainbow {
+        animation: rainbow-border 2s linear infinite;
+      }
+
+      @keyframes float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-10px); }
+      }
+      .animate-float {
+        animation: float 3s ease-in-out infinite;
+      }
     </style>
   <script type="importmap">
 {
