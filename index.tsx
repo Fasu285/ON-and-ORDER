@@ -1,8 +1,12 @@
-// This forces any existing service worker to unregister and clear itself
+// Add this at the VERY TOP of index.tsx
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then((registrations) => {
     for (let registration of registrations) {
-      registration.unregister();
+      registration.unregister().then(() => {
+        console.log('Old Service Worker nuked');
+        // Only reload if we actually found and unregistered a worker
+        window.location.reload(); 
+      });
     }
   });
 }
