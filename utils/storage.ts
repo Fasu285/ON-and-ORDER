@@ -1,4 +1,3 @@
-
 import { MatchRecord, GameState } from '../types';
 
 const HISTORY_KEY = 'on_order_match_history';
@@ -56,8 +55,7 @@ export class NetworkAdapter {
   private matchCode: string;
   private onMessage: NetworkEventCallback;
 
-  // Updated constructor to accept username/senderId matching the call site in GameScreen.tsx
-  constructor(matchCode: string, _username: string, onMessage: NetworkEventCallback) {
+  constructor(matchCode: string, onMessage: NetworkEventCallback) {
     this.matchCode = matchCode;
     this.onMessage = onMessage;
     window.addEventListener('storage', this.handleStorageEvent);
