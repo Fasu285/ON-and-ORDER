@@ -325,7 +325,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       {/* Result Modal Overlay */}
       {showResultModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-black/70 backdrop-blur-md animate-fade-in">
-          <div className={`bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border-4 flex flex-col items-center p-8 text-center space-y-6 ${(isWinnerP1 || is2PMode) ? 'animate-celebrate animate-rainbow border-green-400' : 'animate-shake border-red-300 shadow-red-500/20'}`}>
+          <div className={`bg-white rounded-3xl w-full max-sm overflow-hidden shadow-2xl border-4 flex flex-col items-center p-8 text-center space-y-6 ${(isWinnerP1 || is2PMode) ? 'animate-celebrate animate-rainbow border-green-400' : 'animate-shake border-red-300 shadow-red-500/20'}`}>
             <div className={(isWinnerP1 || is2PMode) ? 'animate-float' : ''}>
                <div className="text-6xl mb-2">{(isWinnerP1 || is2PMode) ? '🏆' : '💀'}</div>
                <h1 className={`text-4xl font-black tracking-tighter ${ (isWinnerP1 || is2PMode) ? 'text-green-600' : 'text-red-600 uppercase' }`}>
@@ -397,7 +397,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
 
             <p className="mb-8 font-bold opacity-80 uppercase tracking-widest text-sm">Pass device to your opponent</p>
             <Button variant="secondary" fullWidth onClick={handleTransition} className="h-16 text-xl shadow-lg border-2 border-orange-400">
-              I AM {gameState.player1History.length > gameState.player2History.length ? p2Name : p1Name}
+              I AM {(gameState.player2Secret === '' || gameState.player1History.length > gameState.player2History.length) ? p2Name : p1Name}
             </Button>
           </div>
         </div>
