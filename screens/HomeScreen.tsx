@@ -42,7 +42,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
     if (step === 'online-lobby') {
         const unsub = listenToAvailableMatches((matches) => {
             setAvailableMatches(matches.filter(m => m.hostUsername !== user.username));
-            setError(null); // Clear errors if we successfully fetched
+            setError(null);
         });
         
         heartbeatRef.current = setInterval(() => {
@@ -83,6 +83,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
             { n: selectedN, timeLimit: selectedTime }
         );
         setHostedMatch(result);
+        setStep('online-lobby'); // Ensure we are in the lobby view to see the code
         
         // Listen for player arrival
         statusUnsubRef.current = listenToLobbyStatus(result.matchId, (status) => {
@@ -91,7 +92,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
                     mode: GameMode.ONLINE,
                     n: selectedN,
                     timeLimit: selectedTime,
-                    matchCode: result.matchId, // Using matchId for adapter
+                    matchCode: result.matchId,
                     role: 'HOST'
                 });
             }
@@ -99,7 +100,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
     } catch (err: any) {
         let msg = err.message || "Unable to host match";
         if (msg.includes('PERMISSION_DENIED')) {
-          msg = "FIREBASE ERROR: Permission Denied. Check your Database Rules in the Firebase Console (Rules must allow read/write).";
+          msg = "FIREBASE ERROR: Permission Denied. Check your Database Rules.";
         }
         setError(msg);
     } finally {
@@ -122,11 +123,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
               role: 'GUEST'
           });
       } catch (err: any) {
-          let msg = err.message || "Unable to join match";
-          if (msg.includes('PERMISSION_DENIED')) {
-            msg = "FIREBASE ERROR: Permission Denied. Check your Database Rules.";
-          }
-          setError(msg);
+          setError(err.message || "Unable to join match");
       } finally {
           setIsBusy(false);
       }
@@ -145,11 +142,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
               role: 'GUEST'
           });
       } catch (err: any) {
-          let msg = err.message || "Unable to join from list";
-          if (msg.includes('PERMISSION_DENIED')) {
-            msg = "FIREBASE ERROR: Permission Denied. Check your Database Rules.";
-          }
-          setError(msg);
+          setError(err.message || "Unable to join from list");
       } finally {
           setIsBusy(false);
       }
@@ -332,7 +325,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
           </div>
 
           <div className="pt-4 space-y-3">
-            <Button fullWidth onClick={selectedMode === GameMode.ONLINE ? handleHostMatch : handleStartLocalMatch} variant="primary" disabled={isBusy}>
+            <Button fullWidth onClick={handleHostMatch} variant="primary" disabled={isBusy}>
                 {selectedMode === GameMode.ONLINE ? 'CREATE PUBLIC LOBBY' : 'START MATCH'}
             </Button>
             <Button fullWidth variant="ghost" onClick={() => setStep(selectedMode === GameMode.ONLINE ? 'online-lobby' : 'mode')}>BACK</Button>
@@ -340,7 +333,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
         </div>
       )}
       
-      <div className="mt-auto text-center text-[8px] text-gray-300 py-4 font-black uppercase tracking-widest">v1.4.0</div>
+      <div className="mt-auto text-center text-[8px] text-gray-300 py-4 font-black uppercase tracking-widest">v1.4.1</div>
     </div>
   );
 };

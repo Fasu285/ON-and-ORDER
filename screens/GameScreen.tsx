@@ -44,9 +44,15 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     };
   });
 
+  const isSetup = gameState.phase.startsWith('SETUP');
   const isPlayer1Turn = gameState.phase === GamePhase.TURN_P1;
   const isPlayer2Turn = gameState.phase === GamePhase.TURN_P2;
-  const isMyTurn = (config.role === 'HOST' && isPlayer1Turn) || (config.role === 'GUEST' && isPlayer2Turn) || config.mode !== GameMode.ONLINE;
+
+  // KEYPAD LOGIC FOR ONLINE
+  const isMyTurn = config.mode !== GameMode.ONLINE || 
+    (isSetup && ((config.role === 'HOST' && !gameState.player1Secret) || (config.role === 'GUEST' && !gameState.player2Secret))) ||
+    (isPlayer1Turn && config.role === 'HOST') ||
+    (isPlayer2Turn && config.role === 'GUEST');
   
   const currentHistory = isPlayer1Turn ? gameState.player1History : gameState.player2History;
   const timerActive = (isPlayer1Turn || isPlayer2Turn) && currentHistory.length > 0 && !isAiThinking && gameState.phase !== GamePhase.GAME_OVER;
@@ -73,14 +79,16 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
                   newState.phase = GamePhase.TURN_P1;
                   newState.message = `${p1Name}'s Turn`;
               } else {
-                  newState.message = "Waiting for your secret...";
+                  newState.message = "Waiting for opponent's secret...";
               }
               return newState;
           }
           if (type === 'GUESS_SUBMITTED') {
               const isP1 = prev.phase === GamePhase.TURN_P1;
               const historyKey = isP1 ? 'player1History' : 'player2History';
-              const result = computeOnAndOrder(isP1 ? prev.player2Secret : prev.player1Secret, payload.guess);
+              const targetSecret = isP1 ? prev.player2Secret : prev.player1Secret;
+              
+              const result = computeOnAndOrder(targetSecret, payload.guess);
               const guessResult = { ...result, guess: payload.guess, timestamp: new Date().toISOString() };
               
               const newHistory = [...prev[historyKey], guessResult];
@@ -181,6 +189,9 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   };
 
   const submitGuess = () => {
+    const valid = validateSequence(input, config.n);
+    if (!valid.valid) return alert(valid.error);
+
     if (config.mode === GameMode.ONLINE) {
         networkRef.current?.send('GUESS_SUBMITTED', { guess: input });
     }
@@ -198,18 +209,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       if (won) {
         const winner = isP1 ? p1Name : p2Name;
         clearActiveSession();
-        saveMatchRecord({
-          id: prev.matchId,
-          timestamp: new Date().toISOString(),
-          mode: config.mode,
-          n: config.n,
-          winner: winner,
-          rounds: newHistory.length,
-          player1Secret: prev.player1Secret,
-          player2Secret: prev.player2Secret,
-          player1History: isP1 ? newHistory : prev.player1History,
-          player2History: !isP1 ? newHistory : prev.player2History,
-        });
         return {
           ...prev,
           [historyKey]: newHistory,
@@ -219,21 +218,18 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
         };
       }
 
-      const nextPhase = config.mode === GameMode.ONLINE ? (isP1 ? GamePhase.TURN_P2 : GamePhase.TURN_P1) : 
-                       (config.mode === GameMode.SINGLE_PLAYER ? GamePhase.TURN_P1 : GamePhase.TRANSITION);
+      const nextPhase = isP1 ? GamePhase.TURN_P2 : GamePhase.TURN_P1;
       
       return {
         ...prev,
         [historyKey]: newHistory,
         phase: nextPhase,
-        message: config.mode === GameMode.SINGLE_PLAYER ? 'CPU thinking...' : (nextPhase === GamePhase.TURN_P1 ? `${p1Name}'s Turn` : `${p2Name}'s Turn`),
+        message: `${nextPhase === GamePhase.TURN_P1 ? p1Name : p2Name}'s Turn`,
         timeLeft: config.timeLimit
       };
     });
     setInput('');
   };
-
-  const isSetup = gameState.phase.startsWith('SETUP');
 
   return (
     <div className="flex flex-col h-full bg-gray-50 overflow-hidden relative">
