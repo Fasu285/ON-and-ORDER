@@ -100,11 +100,11 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const handleTimeOut = () => {
     setGameState(prev => {
       const isP1 = prev.phase === GamePhase.TURN_P1;
-      const nextPhase = prev.config.mode === GameMode.SINGLE_PLAYER ? GamePhase.TURN_P1 : (isP1 ? GamePhase.TURN_P2 : GamePhase.TURN_P1);
+      const nextPhase = prev.config.mode === GameMode.SINGLE_PLAYER ? GamePhase.TURN_P1 : GamePhase.TRANSITION;
       return {
         ...prev,
         phase: nextPhase,
-        message: 'Time Up! Turn Swapped',
+        message: 'Time Up! Pass Device',
         timeLeft: config.timeLimit
       };
     });
@@ -233,18 +233,18 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
           ...prev,
           [historyKey]: newHistory,
           phase: GamePhase.GAME_OVER,
-          winner: isP1 ? user.username : 'Opponent',
-          message: `${isP1 ? user.username : 'Opponent'} Wins!`
+          winner: isP1 ? user.username : (config.secondPlayerName || 'Opponent'),
+          message: `${isP1 ? user.username : (config.secondPlayerName || 'Opponent')} Wins!`
         };
       }
 
-      const nextPhase = config.mode === GameMode.SINGLE_PLAYER ? GamePhase.TURN_P1 : (isP1 ? GamePhase.TURN_P2 : GamePhase.TURN_P1);
+      const nextPhase = config.mode === GameMode.SINGLE_PLAYER ? GamePhase.TURN_P1 : GamePhase.TRANSITION;
       
       return {
         ...prev,
         [historyKey]: newHistory,
         phase: nextPhase,
-        message: config.mode === GameMode.SINGLE_PLAYER ? 'Opponent is thinking...' : `${nextPhase === GamePhase.TURN_P1 ? 'P1' : 'P2'} Turn`,
+        message: config.mode === GameMode.SINGLE_PLAYER ? 'Opponent is thinking...' : 'Pass Device',
         timeLeft: config.timeLimit
       };
     });
@@ -258,10 +258,27 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
 
   const handleTransition = () => {
     setGameState(prev => {
+      // 1. Initial Setup Transition
       if (prev.player2Secret === '') {
         return { ...prev, phase: GamePhase.SETUP_P2, message: 'P2: Set Secret' };
       }
-      return { ...prev, phase: GamePhase.TURN_P1, message: 'Player 1 Turn', timeLeft: config.timeLimit };
+      
+      // 2. Mid-game turn swapping logic
+      // We decide whose turn it is based on history lengths
+      // If history is equal, it's P1's turn to guess (or resume P1's turn)
+      // If P1 has more guesses, it's P2's turn.
+      const p1Len = prev.player1History.length;
+      const p2Len = prev.player2History.length;
+      
+      const nextTurn = p1Len > p2Len ? GamePhase.TURN_P2 : GamePhase.TURN_P1;
+      const playerName = nextTurn === GamePhase.TURN_P1 ? 'Player 1' : (config.secondPlayerName || 'Player 2');
+
+      return { 
+        ...prev, 
+        phase: nextTurn, 
+        message: `${playerName} Turn`, 
+        timeLeft: config.timeLimit 
+      };
     });
     setInput(''); 
   };
@@ -272,6 +289,17 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const handlePlayAgain = () => {
     onRestart(config);
   };
+
+  // Helper to find the last guess and result for transition screen
+  const getLastGuess = () => {
+    const p1Len = gameState.player1History.length;
+    const p2Len = gameState.player2History.length;
+    if (p1Len > p2Len) return gameState.player1History[p1Len - 1];
+    if (p2Len > 0) return gameState.player2History[p2Len - 1];
+    return null;
+  };
+
+  const lastMove = getLastGuess();
 
   return (
     <div className="flex flex-col h-full bg-gray-50 overflow-hidden relative">
@@ -343,10 +371,34 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       <div className="flex-1 flex flex-row overflow-hidden relative">
         {gameState.phase === GamePhase.TRANSITION ? (
           <div className="w-full flex flex-col items-center justify-center p-8 text-center bg-blue-600 text-white">
-            <h3 className="text-3xl font-black mb-4">PLAYER 2</h3>
-            <p className="mb-8 font-bold opacity-80 uppercase tracking-widest">Hand over device now</p>
-            <Button variant="secondary" fullWidth onClick={handleTransition}>
-              I AM PLAYER 2
+            <h3 className="text-3xl font-black mb-2 uppercase tracking-tight">TURN COMPLETE</h3>
+            
+            {lastMove && (
+               <div className="mb-8 p-4 bg-white/10 rounded-2xl border border-white/20 backdrop-blur-sm">
+                  <p className="text-[10px] font-black opacity-60 uppercase tracking-widest mb-1">Last Guess Result</p>
+                  <div className="flex items-center justify-center gap-6">
+                     <div className="text-center">
+                        <div className="text-4xl font-black">{lastMove.guess}</div>
+                        <div className="text-[8px] font-bold opacity-50 uppercase">Sequence</div>
+                     </div>
+                     <div className="w-px h-10 bg-white/20"></div>
+                     <div className="flex gap-4">
+                        <div className="text-center">
+                           <div className="text-2xl font-black">{lastMove.on}</div>
+                           <div className="text-[8px] font-bold opacity-50 uppercase">ON</div>
+                        </div>
+                        <div className="text-center">
+                           <div className="text-2xl font-black">{lastMove.order}</div>
+                           <div className="text-[8px] font-bold opacity-50 uppercase">ORDER</div>
+                        </div>
+                     </div>
+                  </div>
+               </div>
+            )}
+
+            <p className="mb-8 font-bold opacity-80 uppercase tracking-widest text-sm">Pass the device to your opponent</p>
+            <Button variant="secondary" fullWidth onClick={handleTransition} className="h-16 text-xl">
+              I AM {gameState.player1History.length > gameState.player2History.length ? (config.secondPlayerName || 'PLAYER 2') : 'PLAYER 1'}
             </Button>
           </div>
         ) : (
