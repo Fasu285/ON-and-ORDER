@@ -83,6 +83,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
             { n: selectedN, timeLimit: selectedTime }
         );
         setHostedMatch(result);
+        setStep('online-lobby'); // Immediately transition to lobby view to show the code
         
         // Listen for player arrival
         statusUnsubRef.current = listenToLobbyStatus(result.matchId, (status) => {
@@ -114,9 +115,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       setIsBusy(true);
       try {
           const { matchId, config } = await joinMatchByCode(code);
-          // When joining, the config from DB doesn't have the host's username explicitly stored inconfig,
-          // but we can retrieve it or pass it. For simplicity, we'll fetch the lobby info first if needed,
-          // but we'll assume the Guest just needs to start. The names will sync via Network messages.
           onStartGame({
               mode: GameMode.ONLINE,
               n: config.n, 
@@ -142,7 +140,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
               timeLimit: config.timeLimit,
               matchCode: matchId,
               role: 'GUEST',
-              secondPlayerName: match.hostUsername // Pass host name to guest
+              secondPlayerName: match.hostUsername
           });
       } catch (err: any) {
           setError(err.message || "Unable to join from list");
@@ -329,14 +327,14 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
 
           <div className="pt-4 space-y-3">
             <Button fullWidth onClick={selectedMode === GameMode.ONLINE ? handleHostMatch : handleStartLocalMatch} variant="primary" disabled={isBusy}>
-                {selectedMode === GameMode.ONLINE ? 'CREATE PUBLIC LOBBY' : 'START MATCH'}
+                {selectedMode === GameMode.ONLINE ? 'CREATE PRIVATE LOBBY' : 'START MATCH'}
             </Button>
             <Button fullWidth variant="ghost" onClick={() => setStep(selectedMode === GameMode.ONLINE ? 'online-lobby' : 'mode')}>BACK</Button>
           </div>
         </div>
       )}
       
-      <div className="mt-auto text-center text-[8px] text-gray-300 py-4 font-black uppercase tracking-widest">v1.5.0</div>
+      <div className="mt-auto text-center text-[8px] text-gray-300 py-4 font-black uppercase tracking-widest">v1.6.0</div>
     </div>
   );
 };

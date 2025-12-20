@@ -55,13 +55,12 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     (gameState.phase === GamePhase.SETUP_P1) ||
     (gameState.phase === GamePhase.SETUP_P2 && config.mode === GameMode.TWO_PLAYER) ||
     (isPlayer1Turn && (config.mode !== GameMode.ONLINE || config.role === 'HOST')) ||
-    (isPlayer2Turn && config.mode === GameMode.TWO_PLAYER) ||
-    (isPlayer2Turn && config.mode === GameMode.ONLINE && config.role === 'GUEST');
+    (isPlayer2Turn && (config.mode === GameMode.TWO_PLAYER || (config.mode === GameMode.ONLINE && config.role === 'GUEST')));
   
   const currentHistory = isPlayer1Turn ? gameState.player1History : gameState.player2History;
   const timerActive = (isPlayer1Turn || isPlayer2Turn) && currentHistory.length > 0 && !isAiThinking && gameState.phase !== GamePhase.GAME_OVER;
 
-  // AI Logic
+  // AI Logic for Single Player
   useEffect(() => {
     if (config.mode === GameMode.SINGLE_PLAYER && gameState.phase === GamePhase.TURN_P2 && !gameState.winner) {
       setIsAiThinking(true);
@@ -75,18 +74,17 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
 
       return () => clearTimeout(timeout);
     }
-  }, [gameState.phase, config.mode, config.n]);
+  }, [gameState.phase, config.mode, config.n, gameState.winner]);
 
-  // Network Initialization
+  // Network Initialization & Identity Exchange
   useEffect(() => {
     if (config.mode === GameMode.ONLINE && config.matchCode) {
         networkRef.current = new NetworkAdapter(config.matchCode, user.contact, (msg) => {
             handleNetworkMessage(msg);
         });
 
-        if (config.role === 'GUEST') {
-            networkRef.current.send('IDENTITY_EXCHANGE', { username: user.username });
-        }
+        // Exchange identity: Send my name to the opponent
+        networkRef.current.send('IDENTITY_EXCHANGE', { username: user.username });
 
         return () => networkRef.current?.cleanup();
     }
@@ -145,7 +143,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       });
   };
 
-  // Persistence & Result Trigger
+  // Persistence & Result Modal Trigger
   useEffect(() => {
     if (gameState.phase !== GamePhase.GAME_OVER) {
       saveActiveSession(gameState);
@@ -298,7 +296,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
             </h1>
             <p className="text-2xl font-black text-blue-600 truncate">{gameState.winner}</p>
             <div className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100">
-              <p className="text-[10px] font-black text-gray-400 uppercase mb-2 tracking-widest">Enemy Secret Was</p>
+              <p className="text-[10px] font-black text-gray-400 uppercase mb-2 tracking-widest">Opponent Secret Was</p>
               <p className="text-4xl font-mono font-black">{config.role === 'GUEST' ? gameState.player1Secret : gameState.player2Secret}</p>
             </div>
             <div className="space-y-3">
