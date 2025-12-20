@@ -23,8 +23,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const networkRef = useRef<NetworkAdapter | null>(null);
 
-  const p1Name = user.username;
-  
+  // Initial state setup with stored session recovery
   const [gameState, setGameState] = useState<GameState>(() => {
     const saved = getActiveSession();
     if (saved && saved.config.mode === config.mode && saved.phase !== GamePhase.GAME_OVER) return saved;
@@ -37,25 +36,36 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       player2Secret: '', 
       player1History: [],
       player2History: [],
-      message: `${p1Name}, set your secret`,
+      message: `${user.username}, set your secret`,
       winner: null,
       opponentName: config.secondPlayerName || (config.mode === GameMode.SINGLE_PLAYER ? 'CPU' : 'Opponent'),
       timeLeft: config.timeLimit
     };
   });
 
-  const p2Name = gameState.opponentName || 'Opponent';
+  // Resolve logical names for display based on role
+  // Player 1 is ALWAYS the Host (in Online) or the first player (in Local)
+  const isOnline = config.mode === GameMode.ONLINE;
+  const isHost = config.role === 'HOST';
+  
+  const p1Name = isOnline 
+    ? (isHost ? user.username : (gameState.opponentName || 'Host'))
+    : user.username;
+
+  const p2Name = isOnline
+    ? (isHost ? (gameState.opponentName || 'Guest') : user.username)
+    : (gameState.opponentName || 'Opponent');
 
   const isSetup = gameState.phase.startsWith('SETUP');
   const isPlayer1Turn = gameState.phase === GamePhase.TURN_P1;
   const isPlayer2Turn = gameState.phase === GamePhase.TURN_P2;
 
-  // KEYPAD LOGIC
+  // Determine if it is the current local user's turn to interact
   const isMyTurn = 
-    (gameState.phase === GamePhase.SETUP_P1) ||
-    (gameState.phase === GamePhase.SETUP_P2 && config.mode === GameMode.TWO_PLAYER) ||
-    (isPlayer1Turn && (config.mode !== GameMode.ONLINE || config.role === 'HOST')) ||
-    (isPlayer2Turn && (config.mode === GameMode.TWO_PLAYER || (config.mode === GameMode.ONLINE && config.role === 'GUEST')));
+    (gameState.phase === GamePhase.SETUP_P1 && (!isOnline || isHost)) ||
+    (gameState.phase === GamePhase.SETUP_P2 && (config.mode === GameMode.TWO_PLAYER || (isOnline && !isHost))) ||
+    (isPlayer1Turn && (!isOnline || isHost)) ||
+    (isPlayer2Turn && (config.mode === GameMode.TWO_PLAYER || (isOnline && !isHost)));
   
   const currentHistory = isPlayer1Turn ? gameState.player1History : gameState.player2History;
   const timerActive = (isPlayer1Turn || isPlayer2Turn) && currentHistory.length > 0 && !isAiThinking && gameState.phase !== GamePhase.GAME_OVER;
@@ -78,17 +88,17 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
 
   // Network Initialization & Identity Exchange
   useEffect(() => {
-    if (config.mode === GameMode.ONLINE && config.matchCode) {
+    if (isOnline && config.matchCode) {
         networkRef.current = new NetworkAdapter(config.matchCode, user.contact, (msg) => {
             handleNetworkMessage(msg);
         });
 
-        // Exchange identity: Send my name to the opponent
+        // Broadcast identity to ensure opponent knows our name
         networkRef.current.send('IDENTITY_EXCHANGE', { username: user.username });
 
         return () => networkRef.current?.cleanup();
     }
-  }, [config.mode, config.matchCode, user.contact, user.username, config.role]);
+  }, [isOnline, config.matchCode, user.contact, user.username]);
 
   const handleNetworkMessage = (msg: any) => {
       const { type, payload } = msg;
@@ -98,7 +108,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
           }
           if (type === 'SECRET_SET') {
               const newState = { ...prev };
-              if (config.role === 'HOST') newState.player2Secret = payload.secret;
+              if (isHost) newState.player2Secret = payload.secret;
               else newState.player1Secret = payload.secret;
               
               if (newState.player1Secret && newState.player2Secret) {
@@ -110,9 +120,9 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
               return newState;
           }
           if (type === 'GUESS_SUBMITTED') {
-              const isP1 = prev.phase === GamePhase.TURN_P1;
-              const historyKey = isP1 ? 'player1History' : 'player2History';
-              const targetSecret = isP1 ? prev.player2Secret : prev.player1Secret;
+              const isP1Turn = prev.phase === GamePhase.TURN_P1;
+              const historyKey = isP1Turn ? 'player1History' : 'player2History';
+              const targetSecret = isP1Turn ? prev.player2Secret : prev.player1Secret;
               
               const result = computeOnAndOrder(targetSecret, payload.guess);
               const guessResult = { ...result, guess: payload.guess, timestamp: new Date().toISOString() };
@@ -121,7 +131,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
               const won = result.order === config.n;
               
               if (won) {
-                  const winnerName = isP1 ? p1Name : (prev.opponentName || 'Opponent');
+                  const winnerName = isP1Turn ? p1Name : p2Name;
                   return {
                       ...prev,
                       [historyKey]: newHistory,
@@ -131,11 +141,14 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
                   };
               }
 
+              const nextPhase = isP1Turn ? GamePhase.TURN_P2 : GamePhase.TURN_P1;
+              const nextName = nextPhase === GamePhase.TURN_P1 ? p1Name : p2Name;
+
               return {
                   ...prev,
                   [historyKey]: newHistory,
-                  phase: isP1 ? GamePhase.TURN_P2 : GamePhase.TURN_P1,
-                  message: `${isP1 ? (prev.opponentName || 'Opponent') : p1Name}'s Turn`,
+                  phase: nextPhase,
+                  message: `${nextName}'s Turn`,
                   timeLeft: config.timeLimit
               };
           }
@@ -143,7 +156,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       });
   };
 
-  // Persistence & Result Modal Trigger
+  // State persistence and completion triggers
   useEffect(() => {
     if (gameState.phase !== GamePhase.GAME_OVER) {
       saveActiveSession(gameState);
@@ -153,7 +166,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     }
   }, [gameState.phase, gameState.winner, showResultModal, isReviewingHistory]);
 
-  // Timer logic
+  // Turn Timer logic
   useEffect(() => {
     if (timerActive) {
       timerRef.current = setInterval(() => {
@@ -182,9 +195,9 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
 
     setGameState(prev => {
       const newState = { ...prev };
-      if (config.mode === GameMode.ONLINE) {
+      if (isOnline) {
           networkRef.current?.send('SECRET_SET', { secret: input });
-          if (config.role === 'HOST') newState.player1Secret = input;
+          if (isHost) newState.player1Secret = input;
           else newState.player2Secret = input;
 
           if (newState.player1Secret && newState.player2Secret) {
@@ -227,7 +240,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       const won = result.order === config.n;
       
       if (won) {
-        const winner = isP1 ? p1Name : (prev.opponentName || 'Opponent');
+        const winner = isP1 ? p1Name : p2Name;
         clearActiveSession();
         saveMatchRecord({
           id: prev.matchId,
@@ -251,7 +264,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       }
 
       const nextPhase = isP1 ? GamePhase.TURN_P2 : GamePhase.TURN_P1;
-      const nextPlayerName = nextPhase === GamePhase.TURN_P1 ? p1Name : (prev.opponentName || 'Opponent');
+      const nextPlayerName = nextPhase === GamePhase.TURN_P1 ? p1Name : p2Name;
       
       return {
         ...prev,
@@ -267,7 +280,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     const valid = validateSequence(input, config.n);
     if (!valid.valid) return alert(valid.error);
 
-    if (config.mode === GameMode.ONLINE) {
+    if (isOnline) {
         networkRef.current?.send('GUESS_SUBMITTED', { guess: input });
     }
     
@@ -283,6 +296,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     }));
   };
 
+  // Deciding Victory/Defeat strictly by username match
   const isUserWinner = gameState.winner === user.username;
 
   return (
@@ -290,17 +304,24 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       {/* Result Modal */}
       {showResultModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-black/70 backdrop-blur-md animate-fade-in">
-          <div className={`bg-white rounded-3xl w-full max-sm p-8 text-center space-y-6 shadow-2xl border-4 ${isUserWinner ? 'border-green-400' : 'border-red-300'}`}>
-            <h1 className="text-4xl font-black uppercase tracking-tighter">
+          <div className={`bg-white rounded-3xl w-full max-w-sm p-8 text-center space-y-6 shadow-2xl border-4 ${isUserWinner ? 'border-green-400 animate-celebrate' : 'border-red-300 animate-shake'}`}>
+            <h1 className={`text-5xl font-black uppercase tracking-tighter ${isUserWinner ? 'text-green-600' : 'text-red-600'}`}>
                 {isUserWinner ? 'VICTORY' : 'DEFEAT'}
             </h1>
-            <p className="text-2xl font-black text-blue-600 truncate">{gameState.winner}</p>
+            <div className="space-y-1">
+                <p className="text-xs font-black text-gray-400 uppercase tracking-widest">Match Result</p>
+                <p className="text-2xl font-black text-gray-900 truncate">{gameState.winner}</p>
+            </div>
+            
             <div className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100">
               <p className="text-[10px] font-black text-gray-400 uppercase mb-2 tracking-widest">Opponent Secret Was</p>
-              <p className="text-4xl font-mono font-black">{config.role === 'GUEST' ? gameState.player1Secret : gameState.player2Secret}</p>
+              <p className="text-4xl font-mono font-black text-blue-600 tracking-widest">
+                {isOnline ? (isHost ? gameState.player2Secret : gameState.player1Secret) : (config.mode === GameMode.SINGLE_PLAYER ? gameState.player2Secret : (isPlayer1Turn ? gameState.player2Secret : gameState.player1Secret))}
+              </p>
             </div>
-            <div className="space-y-3">
-              <Button fullWidth onClick={() => onRestart(config)} variant="primary">PLAY AGAIN</Button>
+
+            <div className="space-y-3 pt-2">
+              <Button fullWidth onClick={() => onRestart(config)} variant="primary" className="h-14">PLAY AGAIN</Button>
               <Button fullWidth onClick={() => { setShowResultModal(false); setIsReviewingHistory(true); }} variant="secondary">MATCH RECAP</Button>
               <Button fullWidth onClick={onExit} variant="ghost">MAIN MENU</Button>
             </div>
@@ -311,48 +332,59 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       {/* Header */}
       <div className="bg-white border-b border-gray-200 p-4 shadow-sm z-10 flex-none">
         <div className="flex justify-between items-center mb-1">
-          <Button variant="ghost" onClick={onExit} className="!p-0 !min-h-0 text-gray-400 text-xs font-black uppercase">Exit</Button>
-          <div className="text-[10px] font-black text-gray-400 tracking-widest uppercase">{config.mode} • {config.n}N</div>
+          <Button variant="ghost" onClick={onExit} className="!p-0 !min-h-0 text-gray-400 text-xs font-black uppercase tracking-widest hover:text-gray-900">Exit Match</Button>
+          <div className="text-[10px] font-black text-gray-400 tracking-widest uppercase bg-gray-50 px-2 py-1 rounded">{config.mode} • {config.n} DIGITS</div>
         </div>
-        <h2 className="text-2xl font-black text-gray-900 leading-none">{gameState.message}</h2>
+        <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-black text-gray-900 leading-none truncate">{gameState.message}</h2>
+            {timerActive && gameState.timeLeft !== undefined && (
+                <div className={`ml-auto text-xl font-black tabular-nums ${gameState.timeLeft < 10 ? 'text-red-500 animate-pulse' : 'text-orange-500'}`}>
+                    :{gameState.timeLeft.toString().padStart(2, '0')}
+                </div>
+            )}
+        </div>
       </div>
 
-      {/* Game Content */}
+      {/* Game Content - Dynamic Name Display */}
       <div className="flex-1 flex flex-row overflow-hidden bg-white">
         <div className="flex-1 flex flex-col border-r border-gray-100">
-          <div className="p-2 bg-blue-50/50 text-center text-[8px] font-black text-blue-400 uppercase tracking-widest">{p1Name}</div>
+          <div className={`p-2 text-center text-[10px] font-black uppercase tracking-widest border-b ${isPlayer1Turn ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-400'}`}>
+            {p1Name}
+          </div>
           <MoveHistory history={gameState.player1History} n={config.n} />
         </div>
         <div className="flex-1 flex flex-col bg-gray-50/30">
-          <div className="p-2 bg-gray-100/50 text-center text-[8px] font-black text-gray-400 uppercase tracking-widest">{p2Name}</div>
+          <div className={`p-2 text-center text-[10px] font-black uppercase tracking-widest border-b ${isPlayer2Turn ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-400'}`}>
+            {p2Name}
+          </div>
           <MoveHistory history={gameState.player2History} n={config.n} />
         </div>
       </div>
 
       {/* Transition Screen for Local 2P */}
       {gameState.phase === GamePhase.TRANSITION && (
-        <div className="absolute inset-x-0 bottom-0 top-[88px] bg-white/95 backdrop-blur-sm z-20 flex flex-col items-center justify-center p-8 text-center space-y-6">
-          <div className="text-6xl animate-bounce">📱</div>
-          <h3 className="text-2xl font-black uppercase">Pass the Device</h3>
-          <p className="text-gray-500 font-medium">It is now <span className="text-blue-600 font-bold">{p2Name}'s</span> turn to set a secret.</p>
-          <Button fullWidth onClick={startP2Setup} className="max-w-xs">I AM {p2Name.toUpperCase()}</Button>
+        <div className="absolute inset-x-0 bottom-0 top-[88px] bg-white/95 backdrop-blur-sm z-20 flex flex-col items-center justify-center p-8 text-center space-y-6 animate-fade-in">
+          <div className="text-7xl animate-bounce">📱</div>
+          <h3 className="text-3xl font-black uppercase tracking-tighter">Pass the Device</h3>
+          <p className="text-gray-500 font-medium max-w-xs">It is now <span className="text-blue-600 font-black">{p2Name}</span>'s turn to set a secret sequence.</p>
+          <Button fullWidth onClick={startP2Setup} className="max-w-xs h-14">I AM {p2Name.toUpperCase()}</Button>
         </div>
       )}
 
-      {/* Bottom Area */}
+      {/* Bottom Control Area */}
       {gameState.phase === GamePhase.GAME_OVER && isReviewingHistory ? (
-         <div className="p-4 bg-white border-t border-gray-200 pb-safe flex gap-2">
-            <Button fullWidth onClick={() => onRestart(config)} variant="primary">RESTART</Button>
+         <div className="p-4 bg-white border-t border-gray-200 pb-safe flex gap-3 animate-slide-in">
+            <Button fullWidth onClick={() => onRestart(config)} variant="primary">NEW MATCH</Button>
             <Button fullWidth onClick={onExit} variant="ghost">EXIT</Button>
          </div>
       ) : !showResultModal && gameState.phase !== GamePhase.TRANSITION && (
         <div className="bg-white border-t border-gray-200 p-2 pb-safe flex-none">
           {isAiThinking ? (
-            <div className="h-[280px] flex flex-col items-center justify-center space-y-4">
+            <div className="h-[280px] flex flex-col items-center justify-center space-y-4 animate-fade-in">
               <div className="flex space-x-2">
-                <div className="w-3 h-3 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
-                <div className="w-3 h-3 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                <div className="w-3 h-3 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                <div className="w-4 h-4 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
+                <div className="w-4 h-4 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                <div className="w-4 h-4 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
               </div>
               <p className="text-xs font-black text-gray-400 uppercase tracking-widest">CPU is thinking...</p>
             </div>
