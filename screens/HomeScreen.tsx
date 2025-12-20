@@ -42,6 +42,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
     if (step === 'online-lobby') {
         const unsub = listenToAvailableMatches((matches) => {
             setAvailableMatches(matches.filter(m => m.hostUsername !== user.username));
+            setError(null); // Clear errors if we successfully fetched
         });
         
         heartbeatRef.current = setInterval(() => {
@@ -49,7 +50,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
         }, 30000);
 
         return () => {
-            clearInterval(heartbeatRef.current);
+            if (heartbeatRef.current) clearInterval(heartbeatRef.current);
             unsub();
             if (statusUnsubRef.current) statusUnsubRef.current();
             leaveLobby(user.username);
@@ -96,7 +97,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
             }
         });
     } catch (err: any) {
-        setError(err.message);
+        let msg = err.message || "Unable to host match";
+        if (msg.includes('PERMISSION_DENIED')) {
+          msg = "FIREBASE ERROR: Permission Denied. Check your Database Rules in the Firebase Console (Rules must allow read/write).";
+        }
+        setError(msg);
     } finally {
         setIsBusy(false);
     }
@@ -117,7 +122,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
               role: 'GUEST'
           });
       } catch (err: any) {
-          setError(err.message);
+          let msg = err.message || "Unable to join match";
+          if (msg.includes('PERMISSION_DENIED')) {
+            msg = "FIREBASE ERROR: Permission Denied. Check your Database Rules.";
+          }
+          setError(msg);
       } finally {
           setIsBusy(false);
       }
@@ -127,16 +136,20 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       setError(null);
       setIsBusy(true);
       try {
-          await joinMatchByCode(match.joinCode);
+          const { matchId, config } = await joinMatchByCode(match.joinCode);
           onStartGame({
               mode: GameMode.ONLINE,
-              n: match.n,
-              timeLimit: match.timeLimit,
-              matchCode: match.matchId,
+              n: config.n,
+              timeLimit: config.timeLimit,
+              matchCode: matchId,
               role: 'GUEST'
           });
       } catch (err: any) {
-          setError(err.message);
+          let msg = err.message || "Unable to join from list";
+          if (msg.includes('PERMISSION_DENIED')) {
+            msg = "FIREBASE ERROR: Permission Denied. Check your Database Rules.";
+          }
+          setError(msg);
       } finally {
           setIsBusy(false);
       }
@@ -258,7 +271,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
                 </div>
 
                 <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex-none space-y-4">
-                    {error && <p className="text-red-500 text-[10px] font-black text-center uppercase mb-2 animate-shake">{error}</p>}
+                    {error && (
+                      <div className="bg-red-50 p-3 rounded-xl border border-red-100 mb-2 animate-shake">
+                        <p className="text-red-600 text-[10px] font-black text-center uppercase leading-tight">
+                          {error}
+                        </p>
+                      </div>
+                    )}
                     <div className="flex gap-2">
                     <input 
                         type="text" 
@@ -274,7 +293,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
                         <span className="text-[8px] font-black text-gray-300 uppercase">OR</span>
                         <div className="flex-1 h-px bg-gray-100"></div>
                     </div>
-                    <Button fullWidth onClick={() => setStep('settings')} variant="secondary" className="h-14">HOST PRIVATE MATCH</Button>
+                    <Button fullWidth onClick={() => setStep('settings')} variant="secondary" className="h-14" disabled={isBusy}>HOST PRIVATE MATCH</Button>
                 </div>
                 
                 <Button fullWidth variant="ghost" onClick={() => setStep('mode')} className="flex-none">BACK</Button>

@@ -33,7 +33,9 @@ export class NetworkAdapter {
   public send(type: string, payload: any) {
     if (!db) return;
     const message = { type, payload, timestamp: Date.now(), from: this.userId };
-    set(this.matchRef, { lastMessage: message, updatedAt: Date.now() });
+    set(this.matchRef, { lastMessage: message, updatedAt: Date.now() }).catch(err => {
+      console.error("Network send error:", err);
+    });
   }
 
   public cleanup() {
@@ -52,7 +54,7 @@ const generateJoinCode = () => {
 // --- Online Lobby System ---
 
 export const hostMatchInLobby = async (hostUser: { username: string, userId: string }, config: { n: number, timeLimit: number }) => {
-    if (!db) throw new Error("Firebase not configured. Check your environment variables.");
+    if (!db) throw new Error("Firebase not initialized. Check your config in utils/firebase.ts");
     
     const matchId = `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const joinCode = generateJoinCode();
@@ -76,20 +78,36 @@ export const hostMatchInLobby = async (hostUser: { username: string, userId: str
     updates[`joinCodes/${joinCode}`] = { matchId, expiresAt };
     updates[`matches/${matchId}/config`] = { ...config, matchId, role: 'HOST' };
     
-    await update(ref(db), updates);
+    try {
+        await update(ref(db), updates);
 
-    // Auto cleanup on disconnect
-    onDisconnect(ref(db, `lobby/${matchId}`)).remove();
-    onDisconnect(ref(db, `joinCodes/${joinCode}`)).remove();
+        // Auto cleanup on disconnect
+        onDisconnect(ref(db, `lobby/${matchId}`)).remove();
+        onDisconnect(ref(db, `joinCodes/${joinCode}`)).remove();
 
-    return { matchId, joinCode };
+        return { matchId, joinCode };
+    } catch (err: any) {
+        if (err.message && err.message.includes('PERMISSION_DENIED')) {
+            throw new Error("PERMISSION_DENIED: Please check your Firebase Realtime Database Security Rules. They must allow read/write access.");
+        }
+        throw err;
+    }
 };
 
 export const joinMatchByCode = async (code: string) => {
-    if (!db) throw new Error("Firebase not configured.");
+    if (!db) throw new Error("Firebase not initialized.");
     
     const codeRef = ref(db, `joinCodes/${code}`);
-    const snapshot = await get(codeRef);
+    let snapshot;
+    try {
+        snapshot = await get(codeRef);
+    } catch (err: any) {
+        if (err.message && err.message.includes('PERMISSION_DENIED')) {
+            throw new Error("PERMISSION_DENIED: Unable to read from Firebase. Check Security Rules.");
+        }
+        throw err;
+    }
+
     if (!snapshot.exists()) throw new Error("Invalid or expired match code.");
 
     const { matchId } = snapshot.val();
@@ -130,6 +148,8 @@ export const listenToAvailableMatches = (callback: (entries: LobbyEntry[]) => vo
         }
         entries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         callback(entries);
+    }, (err) => {
+        console.error("Lobby listener error:", err);
     });
 };
 
@@ -145,10 +165,10 @@ export const listenToLobbyStatus = (matchId: string, callback: (status: string) 
 
 export const updateHeartbeat = (username: string) => {
     if (!db) return;
-    update(ref(db, `users/${username}`), { lastSeen: Date.now() });
+    update(ref(db, `users/${username}`), { lastSeen: Date.now() }).catch(() => {});
 };
 
 export const leaveLobby = (username: string) => {
     if (!db) return;
-    remove(ref(db, `users/${username}`));
+    remove(ref(db, `users/${username}`)).catch(() => {});
 };
