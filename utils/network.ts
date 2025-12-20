@@ -115,8 +115,8 @@ export const joinMatchByCode = async (code: string) => {
     // Transaction to ensure only one guest joins
     const lobbyRef = ref(db, `lobby/${matchId}`);
     const result = await runTransaction(lobbyRef, (current) => {
-        if (!current) return null;
-        if (current.status !== 'waiting_for_opponent') return; // abort
+        if (!current) return; // Abort if entry missing
+        if (current.status !== 'waiting_for_opponent') return; // Abort if already filled
         return { ...current, status: 'playing' };
     });
 
@@ -124,13 +124,18 @@ export const joinMatchByCode = async (code: string) => {
         throw new Error("Match is full or no longer available.");
     }
 
-    // Fetch config to return to guest
-    const configSnapshot = await get(ref(db, `matches/${matchId}/config`));
-    const config = configSnapshot.val();
+    // Get the data from the lobby entry we just joined
+    const lobbyData = result.snapshot.val();
+    const config = {
+        n: lobbyData.n,
+        timeLimit: lobbyData.timeLimit
+    };
 
-    // Cleanup lobby tracking now that match started
+    // Cleanup the join code so it can't be used again
     await remove(codeRef);
-    await remove(lobbyRef);
+    
+    // Note: We don't remove the lobby entry here immediately to ensure the Host's 
+    // status listener (listenToLobbyStatus) has time to pick up the 'playing' state.
 
     return { matchId, config };
 };

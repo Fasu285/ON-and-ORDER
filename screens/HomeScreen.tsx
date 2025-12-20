@@ -115,6 +115,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       setIsBusy(true);
       try {
           const { matchId, config } = await joinMatchByCode(code);
+          if (!config) throw new Error("Could not retrieve match configuration.");
+          
           onStartGame({
               mode: GameMode.ONLINE,
               n: config.n, 
@@ -134,10 +136,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       setIsBusy(true);
       try {
           const { matchId, config } = await joinMatchByCode(match.joinCode);
+          // Use match properties as primary fallback to avoid null errors
           onStartGame({
               mode: GameMode.ONLINE,
-              n: config.n,
-              timeLimit: config.timeLimit,
+              n: config?.n || match.n,
+              timeLimit: config?.timeLimit || match.timeLimit,
               matchCode: matchId,
               role: 'GUEST',
               secondPlayerName: match.hostUsername
@@ -334,7 +337,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
         </div>
       )}
       
-      <div className="mt-auto text-center text-[8px] text-gray-300 py-4 font-black uppercase tracking-widest">v1.6.0</div>
+      <div className="mt-auto text-center text-[8px] text-gray-300 py-4 font-black uppercase tracking-widest">v1.6.1</div>
     </div>
   );
 };
