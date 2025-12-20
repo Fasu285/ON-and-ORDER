@@ -24,7 +24,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const networkRef = useRef<NetworkAdapter | null>(null);
 
   const p1Name = user.username;
-  const p2Name = config.secondPlayerName || 'Opponent';
   
   const [gameState, setGameState] = useState<GameState>(() => {
     const saved = getActiveSession();
@@ -40,9 +39,12 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       player2History: [],
       message: `${p1Name}, set your secret`,
       winner: null,
+      opponentName: config.secondPlayerName || 'Opponent',
       timeLeft: config.timeLimit
     };
   });
+
+  const p2Name = gameState.opponentName || 'Opponent';
 
   const isSetup = gameState.phase.startsWith('SETUP');
   const isPlayer1Turn = gameState.phase === GamePhase.TURN_P1;
@@ -63,13 +65,22 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
         networkRef.current = new NetworkAdapter(config.matchCode, user.contact, (msg) => {
             handleNetworkMessage(msg);
         });
+
+        // Guest joins and immediately identifies self to host
+        if (config.role === 'GUEST') {
+            networkRef.current.send('IDENTITY_EXCHANGE', { username: user.username });
+        }
+
         return () => networkRef.current?.cleanup();
     }
-  }, [config.mode, config.matchCode, user.contact]);
+  }, [config.mode, config.matchCode, user.contact, user.username, config.role]);
 
   const handleNetworkMessage = (msg: any) => {
       const { type, payload } = msg;
       setGameState(prev => {
+          if (type === 'IDENTITY_EXCHANGE') {
+              return { ...prev, opponentName: payload.username };
+          }
           if (type === 'SECRET_SET') {
               const newState = { ...prev };
               if (config.role === 'HOST') newState.player2Secret = payload.secret;
@@ -95,12 +106,13 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
               const won = result.order === config.n;
               
               if (won) {
+                  const winnerName = isP1 ? p1Name : (prev.opponentName || 'Opponent');
                   return {
                       ...prev,
                       [historyKey]: newHistory,
                       phase: GamePhase.GAME_OVER,
-                      winner: isP1 ? p1Name : p2Name,
-                      message: `${isP1 ? p1Name : p2Name} Wins!`
+                      winner: winnerName,
+                      message: `${winnerName} Wins!`
                   };
               }
 
@@ -108,7 +120,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
                   ...prev,
                   [historyKey]: newHistory,
                   phase: isP1 ? GamePhase.TURN_P2 : GamePhase.TURN_P1,
-                  message: `${isP1 ? p2Name : p1Name}'s Turn`,
+                  message: `${isP1 ? (prev.opponentName || 'Opponent') : p1Name}'s Turn`,
                   timeLeft: config.timeLimit
               };
           }
@@ -124,7 +136,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     if (gameState.phase === GamePhase.GAME_OVER && !showResultModal && !isReviewingHistory && gameState.winner !== null) {
       setShowResultModal(true);
     }
-  }, [gameState.phase, gameState.winner, showResultModal, isReviewingHistory]);
+  }, [gameState.phase, gameState.winner, showResultModal, isReviewingHistory, gameState]);
 
   // Timer logic
   useEffect(() => {
@@ -209,6 +221,18 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       if (won) {
         const winner = isP1 ? p1Name : p2Name;
         clearActiveSession();
+        saveMatchRecord({
+          id: prev.matchId,
+          timestamp: new Date().toISOString(),
+          mode: config.mode,
+          n: config.n,
+          winner: winner,
+          rounds: newHistory.length,
+          player1Secret: prev.player1Secret,
+          player2Secret: prev.player2Secret,
+          player1History: isP1 ? newHistory : prev.player1History,
+          player2History: !isP1 ? newHistory : prev.player2History,
+        });
         return {
           ...prev,
           [historyKey]: newHistory,
@@ -231,22 +255,25 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     setInput('');
   };
 
+  const isUserWinner = gameState.winner === user.username;
+
   return (
     <div className="flex flex-col h-full bg-gray-50 overflow-hidden relative">
       {/* Result Modal */}
       {showResultModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-black/70 backdrop-blur-md animate-fade-in">
-          <div className={`bg-white rounded-3xl w-full max-sm p-8 text-center space-y-6 shadow-2xl border-4 ${gameState.winner === p1Name ? 'border-green-400' : 'border-red-300'}`}>
+          <div className={`bg-white rounded-3xl w-full max-sm p-8 text-center space-y-6 shadow-2xl border-4 ${isUserWinner ? 'border-green-400' : 'border-red-300'}`}>
             <h1 className="text-4xl font-black uppercase tracking-tighter">
-                {gameState.winner === p1Name ? 'VICTORY!' : 'DEFEAT!'}
+                {isUserWinner ? 'VICTORY' : 'DEFEAT'}
             </h1>
             <p className="text-2xl font-black text-blue-600 truncate">{gameState.winner}</p>
             <div className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100">
-              <p className="text-[10px] font-black text-gray-400 uppercase mb-2 tracking-widest">Secret Was</p>
-              <p className="text-4xl font-mono font-black">{gameState.winner === p1Name ? gameState.player2Secret : gameState.player1Secret}</p>
+              <p className="text-[10px] font-black text-gray-400 uppercase mb-2 tracking-widest">Enemy Secret Was</p>
+              <p className="text-4xl font-mono font-black">{config.role === 'HOST' ? gameState.player2Secret : gameState.player1Secret}</p>
             </div>
             <div className="space-y-3">
               <Button fullWidth onClick={() => onRestart(config)} variant="primary">PLAY AGAIN</Button>
+              <Button fullWidth onClick={() => { setShowResultModal(false); setIsReviewingHistory(true); }} variant="secondary">MATCH RECAP</Button>
               <Button fullWidth onClick={onExit} variant="ghost">MAIN MENU</Button>
             </div>
           </div>
@@ -275,7 +302,12 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       </div>
 
       {/* Bottom Area */}
-      {!showResultModal && gameState.phase !== GamePhase.TRANSITION && (
+      {gameState.phase === GamePhase.GAME_OVER && isReviewingHistory ? (
+         <div className="p-4 bg-white border-t border-gray-200 pb-safe flex gap-2">
+            <Button fullWidth onClick={() => onRestart(config)} variant="primary">RESTART</Button>
+            <Button fullWidth onClick={onExit} variant="ghost">EXIT</Button>
+         </div>
+      ) : !showResultModal && gameState.phase !== GamePhase.TRANSITION && (
         <div className="bg-white border-t border-gray-200 p-2 pb-safe flex-none">
           <InputDisplay length={config.n} value={input} isSecret={isSetup} />
           <Keypad 

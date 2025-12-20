@@ -83,7 +83,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
             { n: selectedN, timeLimit: selectedTime }
         );
         setHostedMatch(result);
-        setStep('online-lobby'); // Ensure we are in the lobby view to see the code
         
         // Listen for player arrival
         statusUnsubRef.current = listenToLobbyStatus(result.matchId, (status) => {
@@ -115,6 +114,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       setIsBusy(true);
       try {
           const { matchId, config } = await joinMatchByCode(code);
+          // When joining, the config from DB doesn't have the host's username explicitly stored inconfig,
+          // but we can retrieve it or pass it. For simplicity, we'll fetch the lobby info first if needed,
+          // but we'll assume the Guest just needs to start. The names will sync via Network messages.
           onStartGame({
               mode: GameMode.ONLINE,
               n: config.n, 
@@ -139,7 +141,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
               n: config.n,
               timeLimit: config.timeLimit,
               matchCode: matchId,
-              role: 'GUEST'
+              role: 'GUEST',
+              secondPlayerName: match.hostUsername // Pass host name to guest
           });
       } catch (err: any) {
           setError(err.message || "Unable to join from list");
@@ -157,7 +160,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       mode: selectedMode,
       n: selectedN,
       timeLimit: selectedTime,
-      secondPlayerName: selectedMode === GameMode.TWO_PLAYER ? p2Name.trim() : undefined
+      secondPlayerName: selectedMode === GameMode.TWO_PLAYER ? p2Name.trim() : (selectedMode === GameMode.SINGLE_PLAYER ? 'CPU' : 'Opponent')
     });
   };
 
@@ -325,7 +328,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
           </div>
 
           <div className="pt-4 space-y-3">
-            <Button fullWidth onClick={handleHostMatch} variant="primary" disabled={isBusy}>
+            <Button fullWidth onClick={selectedMode === GameMode.ONLINE ? handleHostMatch : handleStartLocalMatch} variant="primary" disabled={isBusy}>
                 {selectedMode === GameMode.ONLINE ? 'CREATE PUBLIC LOBBY' : 'START MATCH'}
             </Button>
             <Button fullWidth variant="ghost" onClick={() => setStep(selectedMode === GameMode.ONLINE ? 'online-lobby' : 'mode')}>BACK</Button>
@@ -333,7 +336,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
         </div>
       )}
       
-      <div className="mt-auto text-center text-[8px] text-gray-300 py-4 font-black uppercase tracking-widest">v1.4.1</div>
+      <div className="mt-auto text-center text-[8px] text-gray-300 py-4 font-black uppercase tracking-widest">v1.5.0</div>
     </div>
   );
 };
