@@ -53,31 +53,23 @@ export const computeOnAndOrder = (secret: string, guess: string): { on: number; 
   return { on, order };
 };
 
-export const generateRandomSecret = (n: number, seed?: string): string => {
-  // Simple pseudo-random for "AI"
-  // If seed is provided, we use it to make deterministic outputs for QA
+/**
+ * Generates a random secret sequence of N unique digits.
+ * Uses window.crypto for higher quality randomness to ensure variety.
+ */
+export const generateRandomSecret = (n: number): string => {
   const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
   let available = [...digits];
   let secret = '';
   
-  // A very basic seeded random (not cryptographically secure, just for QA reproducibility)
-  const random = () => {
-    if (seed) {
-        let h = 0xdeadbeef;
-        for(let i = 0; i < seed.length; i++)
-            h = Math.imul(h ^ seed.charCodeAt(i), 2654435761);
-        const val = ((h ^ h >>> 16) >>> 0) / 4294967296;
-        // mutate seed slightly for next call
-        seed += "x"; 
-        return val;
-    }
-    return Math.random();
-  };
+  // Use crypto for better randomness
+  const array = new Uint32Array(n);
+  window.crypto.getRandomValues(array);
 
   for (let i = 0; i < n; i++) {
-    const index = Math.floor(random() * available.length);
-    secret += available[index];
-    available.splice(index, 1);
+    const randomIndex = array[i] % available.length;
+    secret += available[randomIndex];
+    available.splice(randomIndex, 1);
   }
   return secret;
 };

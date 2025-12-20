@@ -133,7 +133,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
           return {
             ...prev,
             player1Secret: input,
-            player2Secret: generateRandomSecret(config.n, input),
+            player2Secret: generateRandomSecret(config.n),
             phase: GamePhase.TURN_P1,
             message: `${p1Name}'s Turn`,
             timeLeft: config.timeLimit
@@ -206,7 +206,11 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
                 mode: config.mode,
                 n: config.n,
                 winner: 'CPU',
-                rounds: newHistory.length
+                rounds: newHistory.length,
+                player1Secret: inner.player1Secret,
+                player2Secret: inner.player2Secret,
+                player1History: inner.player1History,
+                player2History: newHistory
               });
             }
 
@@ -246,8 +250,13 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
           timestamp: new Date().toISOString(),
           mode: config.mode,
           n: config.n,
-          winner: isP1 ? 'Me' : 'Opponent',
-          rounds: newHistory.length
+          winner: currentWinner,
+          rounds: newHistory.length,
+          player1Secret: prev.player1Secret,
+          player2Secret: prev.player2Secret,
+          player1History: isP1 ? newHistory : prev.player1History,
+          player2History: !isP1 ? newHistory : prev.player2History,
+          opponentName: p2Name
         });
         return {
           ...prev,
@@ -310,9 +319,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const getLastGuess = () => {
     const p1Len = gameState.player1History.length;
     const p2Len = gameState.player2History.length;
-    // The transition happens *after* a guess is submitted, 
-    // so the last guess belongs to the history that was just updated.
-    // If P1 has more guesses, they just went. If equal and P2 has guesses, P2 just went.
     if (p1Len > p2Len) return gameState.player1History[p1Len - 1];
     if (p2Len > 0) return gameState.player2History[p2Len - 1];
     return null;
@@ -322,7 +328,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
 
   return (
     <div className="flex flex-col h-full bg-gray-50 overflow-hidden relative">
-      {/* Result Modal Overlay */}
+      {/* Result Modal Overlay (RECAP) */}
       {showResultModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-black/70 backdrop-blur-md animate-fade-in">
           <div className={`bg-white rounded-3xl w-full max-sm overflow-hidden shadow-2xl border-4 flex flex-col items-center p-8 text-center space-y-6 ${(isWinnerP1 || is2PMode) ? 'animate-celebrate animate-rainbow border-green-400' : 'animate-shake border-red-300 shadow-red-500/20'}`}>
@@ -356,7 +362,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
                 PLAY AGAIN
               </Button>
               <Button fullWidth onClick={() => { setShowResultModal(false); setIsReviewingHistory(true); }} variant="secondary" className="h-12 text-sm font-black uppercase tracking-widest">
-                Review History
+                REVIEW RECAP
               </Button>
               <Button fullWidth onClick={onExit} variant="ghost" className="h-10 text-xs font-bold text-gray-400 uppercase tracking-widest">
                 Main Menu
@@ -423,7 +429,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
         </h2>
       </div>
 
-      {/* Game Content - Background visibility depends on pointer-events when popups are active */}
+      {/* Game Content */}
       <div className={`flex-1 flex flex-row overflow-hidden relative ${(gameState.phase === GamePhase.TRANSITION || showResultModal) ? 'pointer-events-none grayscale-[0.2] blur-[1px]' : ''}`}>
         <div className="flex-1 flex flex-col border-r border-gray-100">
           <div className="p-2 bg-blue-50/50 text-center text-[8px] font-black text-blue-400 uppercase tracking-widest">{p1Name}</div>
@@ -460,7 +466,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
             New Match
           </Button>
           {!showResultModal && (
-             <Button fullWidth variant="ghost" onClick={() => setShowResultModal(true)} className="text-xs font-black uppercase tracking-widest">Back to Results</Button>
+             <Button fullWidth variant="ghost" onClick={() => setShowResultModal(true)} className="text-xs font-black uppercase tracking-widest">VIEW RECAP</Button>
           )}
           <Button fullWidth variant="ghost" onClick={onExit} className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Exit to Menu</Button>
         </div>

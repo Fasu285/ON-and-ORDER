@@ -60,8 +60,13 @@ export interface MatchRecord {
   timestamp: string;
   mode: GameMode;
   n: number;
-  winner: string; // "Me", "Opponent", "CPU"
+  winner: string; // The display name of the winner
   rounds: number;
+  player1Secret: string;
+  player2Secret: string;
+  player1History: GuessResult[];
+  player2History: GuessResult[];
+  opponentName?: string;
 }
 
 export interface GameState {

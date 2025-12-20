@@ -71,7 +71,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
         // 3. Listen for other players
         const unsubLobby = listenToLobby((users) => {
             // Show everyone except self.
-            // Note: We filter out really old users (inactive > 2 mins)
             const active = users.filter(u => 
                 u.username !== user.username && 
                 (Date.now() - u.lastSeen < 120000)
@@ -127,7 +126,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
   const handleModeSelect = (mode: GameMode) => {
     setSelectedMode(mode);
     if (mode === GameMode.ONLINE) {
-       // Pre-select defaults to show in lobby
        setSelectedN(4);
        setSelectedTime(30);
        setStep('online-menu');
@@ -145,13 +143,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       return;
     }
     const code = matchCodeInput.toUpperCase();
-    
-    // Feedback
-    console.log(`Joining room ${code} as Guest...`);
-    
     onStartGame({
       mode: GameMode.ONLINE,
-      n: 4, // Guest accepts host's config usually, this is default
+      n: 4,
       timeLimit: 30,
       matchCode: code,
       role: 'GUEST'
@@ -159,14 +153,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
   };
 
   const handleInviteConnect = (targetUser: LobbyUser) => {
-      // Create code
       const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
       let code = '';
       for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
 
       sendInvite(targetUser.username, user.username, code, { n: selectedN, timeLimit: selectedTime });
       
-      // Start as host immediately
       onStartGame({
           mode: GameMode.ONLINE,
           n: selectedN as any,
@@ -193,7 +185,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       return;
     }
     
-    // Manual Host Creation (Fallback)
     if (selectedMode === GameMode.ONLINE) {
       const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
       let code = '';
@@ -278,7 +269,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
           </Button>
           
           <Button fullWidth variant={hasActiveGame ? "ghost" : "secondary"} onClick={onViewHistory}>
-            HISTORY
+            MATCH RECAP
           </Button>
           <Button fullWidth variant="ghost" onClick={runDiagnostics}>
             RUN DIAGNOSTICS
