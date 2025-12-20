@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameConfig, GameState, GameMode, GuessResult, GamePhase, User } from '../types';
 import { validateSequence, computeOnAndOrder, generateRandomSecret } from '../utils/gameLogic';
-import { saveActiveSession, getActiveSession, clearActiveSession } from '../utils/storage';
+import { saveActiveSession, getActiveSession, clearActiveSession, saveMatchRecord } from '../utils/storage';
 import Keypad from '../components/Keypad';
 import InputDisplay from '../components/InputDisplay';
 import MoveHistory from '../components/MoveHistory';
@@ -38,7 +38,11 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [showResultModal, setShowResultModal] = useState(false);
   const [isReviewingHistory, setIsReviewingHistory] = useState(false);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  // Fix: Replaced NodeJS.Timeout with ReturnType<typeof setInterval> to avoid environment-specific type definition issues in frontend code
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const p1Name = user.username;
+  const p2Name = config.secondPlayerName || 'Player 2';
   
   const [gameState, setGameState] = useState<GameState>(() => {
     const saved = getActiveSession();
@@ -52,7 +56,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       player2Secret: '', 
       player1History: [],
       player2History: [],
-      message: `${user.username}, set your secret`,
+      message: `${p1Name}, set your secret`,
       winner: null,
       timeLeft: config.timeLimit
     };
@@ -71,7 +75,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     if (gameState.phase === GamePhase.GAME_OVER && !showResultModal && !isReviewingHistory && gameState.winner !== null) {
       setShowResultModal(true);
     }
-  }, [gameState, showResultModal, isReviewingHistory]);
+  }, [gameState.phase, gameState.winner, showResultModal, isReviewingHistory]);
 
   // Timer logic
   useEffect(() => {
@@ -148,7 +152,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
           ...prev,
           player2Secret: input,
           phase: GamePhase.TURN_P1,
-          message: 'Player 1 Turn',
+          message: `${p1Name} Turn`,
           timeLeft: config.timeLimit
         };
       }
@@ -197,6 +201,14 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
               winner = 'CPU';
               finalMsg = 'DEFEAT!';
               clearActiveSession();
+              saveMatchRecord({
+                id: inner.matchId,
+                timestamp: new Date().toISOString(),
+                mode: config.mode,
+                n: config.n,
+                winner: 'CPU',
+                rounds: newHistory.length
+              });
             }
 
             return {
@@ -214,7 +226,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
         return { ...prev, message: `CPU guessed ${aiGuess}...` };
       });
     }, 1000);
-  }, [config.timeLimit]);
+  }, [config.timeLimit, config.mode, config.n]);
 
   const submitGuess = () => {
     const isP1 = gameState.phase === GamePhase.TURN_P1;
@@ -228,13 +240,22 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       const won = result.order === config.n;
       
       if (won) {
+        const currentWinner = isP1 ? p1Name : p2Name;
         clearActiveSession();
+        saveMatchRecord({
+          id: prev.matchId,
+          timestamp: new Date().toISOString(),
+          mode: config.mode,
+          n: config.n,
+          winner: isP1 ? 'Me' : 'Opponent',
+          rounds: newHistory.length
+        });
         return {
           ...prev,
           [historyKey]: newHistory,
           phase: GamePhase.GAME_OVER,
-          winner: isP1 ? user.username : (config.secondPlayerName || 'Opponent'),
-          message: `${isP1 ? user.username : (config.secondPlayerName || 'Opponent')} Wins!`
+          winner: currentWinner,
+          message: `${currentWinner} Wins!`
         };
       }
 
@@ -258,20 +279,15 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
 
   const handleTransition = () => {
     setGameState(prev => {
-      // 1. Initial Setup Transition
       if (prev.player2Secret === '') {
-        return { ...prev, phase: GamePhase.SETUP_P2, message: 'P2: Set Secret' };
+        return { ...prev, phase: GamePhase.SETUP_P2, message: `${p2Name}: Set Secret` };
       }
       
-      // 2. Mid-game turn swapping logic
-      // We decide whose turn it is based on history lengths
-      // If history is equal, it's P1's turn to guess (or resume P1's turn)
-      // If P1 has more guesses, it's P2's turn.
       const p1Len = prev.player1History.length;
       const p2Len = prev.player2History.length;
       
       const nextTurn = p1Len > p2Len ? GamePhase.TURN_P2 : GamePhase.TURN_P1;
-      const playerName = nextTurn === GamePhase.TURN_P1 ? 'Player 1' : (config.secondPlayerName || 'Player 2');
+      const playerName = nextTurn === GamePhase.TURN_P1 ? p1Name : p2Name;
 
       return { 
         ...prev, 
@@ -284,13 +300,13 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   };
 
   const isSetup = gameState.phase.startsWith('SETUP');
-  const isWinner = gameState.winner === user.username;
+  const isWinnerP1 = gameState.winner === p1Name;
+  const is2PMode = config.mode === GameMode.TWO_PLAYER;
 
   const handlePlayAgain = () => {
     onRestart(config);
   };
 
-  // Helper to find the last guess and result for transition screen
   const getLastGuess = () => {
     const p1Len = gameState.player1History.length;
     const p2Len = gameState.player2History.length;
@@ -306,17 +322,17 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       {/* Result Modal Overlay */}
       {showResultModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-black/70 backdrop-blur-md animate-fade-in">
-          <div className={`bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border-4 flex flex-col items-center p-8 text-center space-y-6 ${isWinner ? 'animate-celebrate animate-rainbow' : 'animate-shake border-gray-300 shadow-red-500/20'}`}>
-            <div className={isWinner ? 'animate-float' : ''}>
-               <div className="text-6xl mb-2">{isWinner ? '🏆' : '💀'}</div>
-               <h1 className={`text-4xl font-black tracking-tighter ${isWinner ? 'text-gray-900' : 'text-red-600 uppercase'}`}>
-                 {isWinner ? 'BOOM!' : 'CRACKED!'}
+          <div className={`bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border-4 flex flex-col items-center p-8 text-center space-y-6 ${(isWinnerP1 || is2PMode) ? 'animate-celebrate animate-rainbow' : 'animate-shake border-gray-300 shadow-red-500/20'}`}>
+            <div className={(isWinnerP1 || is2PMode) ? 'animate-float' : ''}>
+               <div className="text-6xl mb-2">{(isWinnerP1 || is2PMode) ? '🏆' : '💀'}</div>
+               <h1 className={`text-4xl font-black tracking-tighter ${ (isWinnerP1 || is2PMode) ? 'text-gray-900' : 'text-red-600 uppercase' }`}>
+                 {(isWinnerP1 || is2PMode) ? 'WINNER!' : 'CRACKED!'}
                </h1>
             </div>
             
             <div className="space-y-1">
-              <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">{isWinner ? 'Victory for' : 'Defeat by'}</p>
-              <p className={`text-3xl font-black truncate max-w-full ${isWinner ? 'text-blue-600' : 'text-gray-900'}`}>
+              <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">{(isWinnerP1 || is2PMode) ? 'Champion' : 'Defeat by'}</p>
+              <p className={`text-3xl font-black truncate max-w-full ${ (isWinnerP1 || is2PMode) ? 'text-blue-600' : 'text-gray-900'}`}>
                 {gameState.winner}
               </p>
             </div>
@@ -324,7 +340,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
             <div className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100">
               <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">The Secret Was</p>
               <div className="flex justify-center gap-2">
-                {(isWinner ? gameState.player2Secret : gameState.player1Secret).split('').map((char, i) => (
+                {(gameState.winner === p1Name ? gameState.player2Secret : gameState.player1Secret).split('').map((char, i) => (
                   <div key={i} className="w-10 h-12 bg-white border-2 border-gray-200 rounded-lg flex items-center justify-center text-2xl font-black text-gray-800 shadow-sm">
                     {char}
                   </div>
@@ -343,6 +359,43 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
                 Main Menu
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transition Overlay (Popup) */}
+      {gameState.phase === GamePhase.TRANSITION && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-blue-600 rounded-3xl w-full max-w-xs p-8 text-center shadow-2xl border-4 border-white/20 text-white animate-slide-in">
+            <h3 className="text-3xl font-black mb-2 uppercase tracking-tight">TURN COMPLETE</h3>
+            
+            {lastMove && (
+               <div className="mb-8 p-4 bg-white/10 rounded-2xl border border-white/20">
+                  <p className="text-[10px] font-black opacity-60 uppercase tracking-widest mb-1">Last Guess Result</p>
+                  <div className="flex items-center justify-center gap-6">
+                     <div className="text-center">
+                        <div className="text-4xl font-black">{lastMove.guess}</div>
+                        <div className="text-[8px] font-bold opacity-50 uppercase">Sequence</div>
+                     </div>
+                     <div className="w-px h-10 bg-white/20"></div>
+                     <div className="flex gap-4">
+                        <div className="text-center">
+                           <div className="text-2xl font-black">{lastMove.on}</div>
+                           <div className="text-[8px] font-bold opacity-50 uppercase">ON</div>
+                        </div>
+                        <div className="text-center">
+                           <div className="text-2xl font-black">{lastMove.order}</div>
+                           <div className="text-[8px] font-bold opacity-50 uppercase">ORDER</div>
+                        </div>
+                     </div>
+                  </div>
+               </div>
+            )}
+
+            <p className="mb-8 font-bold opacity-80 uppercase tracking-widest text-sm">Pass the device to your opponent</p>
+            <Button variant="secondary" fullWidth onClick={handleTransition} className="h-16 text-xl shadow-lg border-2 border-orange-400">
+              I AM {gameState.player1History.length > gameState.player2History.length ? p2Name : p1Name}
+            </Button>
           </div>
         </div>
       )}
@@ -369,50 +422,14 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
 
       {/* Game Content */}
       <div className="flex-1 flex flex-row overflow-hidden relative">
-        {gameState.phase === GamePhase.TRANSITION ? (
-          <div className="w-full flex flex-col items-center justify-center p-8 text-center bg-blue-600 text-white">
-            <h3 className="text-3xl font-black mb-2 uppercase tracking-tight">TURN COMPLETE</h3>
-            
-            {lastMove && (
-               <div className="mb-8 p-4 bg-white/10 rounded-2xl border border-white/20 backdrop-blur-sm">
-                  <p className="text-[10px] font-black opacity-60 uppercase tracking-widest mb-1">Last Guess Result</p>
-                  <div className="flex items-center justify-center gap-6">
-                     <div className="text-center">
-                        <div className="text-4xl font-black">{lastMove.guess}</div>
-                        <div className="text-[8px] font-bold opacity-50 uppercase">Sequence</div>
-                     </div>
-                     <div className="w-px h-10 bg-white/20"></div>
-                     <div className="flex gap-4">
-                        <div className="text-center">
-                           <div className="text-2xl font-black">{lastMove.on}</div>
-                           <div className="text-[8px] font-bold opacity-50 uppercase">ON</div>
-                        </div>
-                        <div className="text-center">
-                           <div className="text-2xl font-black">{lastMove.order}</div>
-                           <div className="text-[8px] font-bold opacity-50 uppercase">ORDER</div>
-                        </div>
-                     </div>
-                  </div>
-               </div>
-            )}
-
-            <p className="mb-8 font-bold opacity-80 uppercase tracking-widest text-sm">Pass the device to your opponent</p>
-            <Button variant="secondary" fullWidth onClick={handleTransition} className="h-16 text-xl">
-              I AM {gameState.player1History.length > gameState.player2History.length ? (config.secondPlayerName || 'PLAYER 2') : 'PLAYER 1'}
-            </Button>
-          </div>
-        ) : (
-          <>
-            <div className="flex-1 flex flex-col border-r border-gray-100">
-              <div className="p-2 bg-blue-50/50 text-center text-[8px] font-black text-blue-400 uppercase tracking-widest">P1 Guesses</div>
-              <MoveHistory history={gameState.player1History} n={config.n} />
-            </div>
-            <div className="flex-1 flex flex-col bg-gray-50/30">
-              <div className="p-2 bg-gray-100/50 text-center text-[8px] font-black text-gray-400 uppercase tracking-widest">CPU/P2 Guesses</div>
-              <MoveHistory history={gameState.player2History} n={config.n} />
-            </div>
-          </>
-        )}
+        <div className="flex-1 flex flex-col border-r border-gray-100">
+          <div className="p-2 bg-blue-50/50 text-center text-[8px] font-black text-blue-400 uppercase tracking-widest">{p1Name} Guesses</div>
+          <MoveHistory history={gameState.player1History} n={config.n} />
+        </div>
+        <div className="flex-1 flex flex-col bg-gray-50/30">
+          <div className="p-2 bg-gray-100/50 text-center text-[8px] font-black text-gray-400 uppercase tracking-widest">{p2Name} Guesses</div>
+          <MoveHistory history={gameState.player2History} n={config.n} />
+        </div>
       </div>
 
       {/* Bottom Area */}
