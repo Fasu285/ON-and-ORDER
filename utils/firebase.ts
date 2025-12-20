@@ -1,5 +1,6 @@
+
 import { initializeApp } from "firebase/app";
-import { getDatabase, Database } from "firebase/database";
+import { getDatabase, type Database } from "firebase/database";
 
 // Helper to safely access env vars in Vite
 const getEnv = (key: string) => {
