@@ -23,15 +23,21 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const networkRef = useRef<NetworkAdapter | null>(null);
 
+  const isOnline = config.mode === GameMode.ONLINE;
+  const isHost = config.role === 'HOST';
+
   // Initial state setup with stored session recovery
   const [gameState, setGameState] = useState<GameState>(() => {
     const saved = getActiveSession();
     if (saved && saved.config.mode === config.mode && saved.phase !== GamePhase.GAME_OVER) return saved;
     
+    // Guest must start in SETUP_P2 to allow secret input via isMyTurn logic
+    const initialPhase = isOnline && !isHost ? GamePhase.SETUP_P2 : GamePhase.SETUP_P1;
+
     return {
       matchId: config.matchCode || 'match-' + Date.now(),
       config,
-      phase: GamePhase.SETUP_P1,
+      phase: initialPhase,
       player1Secret: '',
       player2Secret: '', 
       player1History: [],
@@ -43,11 +49,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     };
   });
 
-  // Resolve logical names for display based on role
-  // Player 1 is ALWAYS the Host (in Online) or the first player (in Local)
-  const isOnline = config.mode === GameMode.ONLINE;
-  const isHost = config.role === 'HOST';
-  
   const p1Name = isOnline 
     ? (isHost ? user.username : (gameState.opponentName || 'Host'))
     : user.username;
@@ -56,7 +57,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     ? (isHost ? (gameState.opponentName || 'Guest') : user.username)
     : (gameState.opponentName || 'Opponent');
 
-  const isSetup = gameState.phase.startsWith('SETUP');
+  const isSetup = gameState.phase === GamePhase.SETUP_P1 || gameState.phase === GamePhase.SETUP_P2;
   const isPlayer1Turn = gameState.phase === GamePhase.TURN_P1;
   const isPlayer2Turn = gameState.phase === GamePhase.TURN_P2;
 
@@ -68,6 +69,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     (isPlayer2Turn && (config.mode === GameMode.TWO_PLAYER || (isOnline && !isHost)));
   
   const currentHistory = isPlayer1Turn ? gameState.player1History : gameState.player2History;
+  // Timer only runs during active guessing turns after first move or if specific game logic requires it
   const timerActive = (isPlayer1Turn || isPlayer2Turn) && currentHistory.length > 0 && !isAiThinking && gameState.phase !== GamePhase.GAME_OVER;
 
   // AI Logic for Single Player
@@ -92,10 +94,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
         networkRef.current = new NetworkAdapter(config.matchCode, user.contact, (msg) => {
             handleNetworkMessage(msg);
         });
-
-        // Broadcast identity to ensure opponent knows our name
         networkRef.current.send('IDENTITY_EXCHANGE', { username: user.username });
-
         return () => networkRef.current?.cleanup();
     }
   }, [isOnline, config.matchCode, user.contact, user.username]);
@@ -115,7 +114,9 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
                   newState.phase = GamePhase.TURN_P1;
                   newState.message = `${p1Name}'s Turn`;
               } else {
-                  newState.message = "Waiting for opponent's secret...";
+                  // Keep message appropriate based on whether local player is ready
+                  const localReady = isHost ? !!newState.player1Secret : !!newState.player2Secret;
+                  newState.message = localReady ? "Waiting for opponent's secret..." : `${user.username}, set your secret`;
               }
               return newState;
           }
@@ -156,7 +157,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       });
   };
 
-  // State persistence and completion triggers
   useEffect(() => {
     if (gameState.phase !== GamePhase.GAME_OVER) {
       saveActiveSession(gameState);
@@ -166,7 +166,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     }
   }, [gameState.phase, gameState.winner, showResultModal, isReviewingHistory]);
 
-  // Turn Timer logic
   useEffect(() => {
     if (timerActive) {
       timerRef.current = setInterval(() => {
@@ -296,7 +295,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     }));
   };
 
-  // Deciding Victory/Defeat strictly by username match
   const isUserWinner = gameState.winner === user.username;
 
   return (
@@ -316,7 +314,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
             <div className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100">
               <p className="text-[10px] font-black text-gray-400 uppercase mb-2 tracking-widest">Opponent Secret Was</p>
               <p className="text-4xl font-mono font-black text-blue-600 tracking-widest">
-                {isOnline ? (isHost ? gameState.player2Secret : gameState.player1Secret) : (config.mode === GameMode.SINGLE_PLAYER ? gameState.player2Secret : (isPlayer1Turn ? gameState.player2Secret : gameState.player1Secret))}
+                {isOnline ? (isHost ? gameState.player2Secret : gameState.player1Secret) : (config.mode === GameMode.SINGLE_PLAYER ? gameState.player2Secret : (gameState.phase === GamePhase.GAME_OVER ? (gameState.winner === p1Name ? gameState.player2Secret : gameState.player1Secret) : '?'))}
               </p>
             </div>
 
@@ -345,7 +343,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
         </div>
       </div>
 
-      {/* Game Content - Dynamic Name Display */}
+      {/* Game Content */}
       <div className="flex-1 flex flex-row overflow-hidden bg-white">
         <div className="flex-1 flex flex-col border-r border-gray-100">
           <div className={`p-2 text-center text-[10px] font-black uppercase tracking-widest border-b ${isPlayer1Turn ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-400'}`}>

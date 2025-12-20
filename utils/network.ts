@@ -33,7 +33,11 @@ export class NetworkAdapter {
   public send(type: string, payload: any) {
     if (!db) return;
     const message = { type, payload, timestamp: Date.now(), from: this.userId };
-    set(this.matchRef, { lastMessage: message, updatedAt: Date.now() }).catch(err => {
+    // CRITICAL FIX: Use update instead of set to avoid wiping out config and other match data
+    update(this.matchRef, { 
+      lastMessage: message, 
+      updatedAt: Date.now() 
+    }).catch(err => {
       console.error("Network send error:", err);
     });
   }
@@ -134,9 +138,6 @@ export const joinMatchByCode = async (code: string) => {
     // Cleanup the join code so it can't be used again
     await remove(codeRef);
     
-    // Note: We don't remove the lobby entry here immediately to ensure the Host's 
-    // status listener (listenToLobbyStatus) has time to pick up the 'playing' state.
-
     return { matchId, config };
 };
 
