@@ -38,7 +38,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [showResultModal, setShowResultModal] = useState(false);
   const [isReviewingHistory, setIsReviewingHistory] = useState(false);
-  // Fix: Replaced NodeJS.Timeout with ReturnType<typeof setInterval> to avoid environment-specific type definition issues in frontend code
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const p1Name = user.username;
@@ -67,7 +66,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const currentHistory = isPlayer1Turn ? gameState.player1History : gameState.player2History;
   const timerActive = (isPlayer1Turn || isPlayer2Turn) && currentHistory.length > 0 && !isAiThinking && gameState.phase !== GamePhase.GAME_OVER;
 
-  // Persistence
+  // Persistence & Result Trigger
   useEffect(() => {
     if (gameState.phase !== GamePhase.GAME_OVER) {
       saveActiveSession(gameState);
@@ -108,7 +107,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       return {
         ...prev,
         phase: nextPhase,
-        message: 'Time Up! Pass Device',
+        message: 'Time Up!',
         timeLeft: config.timeLimit
       };
     });
@@ -136,7 +135,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
             player1Secret: input,
             player2Secret: generateRandomSecret(config.n, input),
             phase: GamePhase.TURN_P1,
-            message: 'Your Turn',
+            message: `${p1Name}'s Turn`,
             timeLeft: config.timeLimit
           };
         } else {
@@ -144,7 +143,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
             ...prev,
             player1Secret: input,
             phase: GamePhase.TRANSITION,
-            message: 'Pass the device'
+            message: 'Pass Device'
           };
         }
       } else if (prev.phase === GamePhase.SETUP_P2) {
@@ -152,7 +151,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
           ...prev,
           player2Secret: input,
           phase: GamePhase.TURN_P1,
-          message: `${p1Name} Turn`,
+          message: `${p1Name}'s Turn`,
           timeLeft: config.timeLimit
         };
       }
@@ -265,7 +264,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
         ...prev,
         [historyKey]: newHistory,
         phase: nextPhase,
-        message: config.mode === GameMode.SINGLE_PLAYER ? 'Opponent is thinking...' : 'Pass Device',
+        message: config.mode === GameMode.SINGLE_PLAYER ? 'CPU is thinking...' : 'Pass Device',
         timeLeft: config.timeLimit
       };
     });
@@ -280,19 +279,20 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const handleTransition = () => {
     setGameState(prev => {
       if (prev.player2Secret === '') {
-        return { ...prev, phase: GamePhase.SETUP_P2, message: `${p2Name}: Set Secret` };
+        return { ...prev, phase: GamePhase.SETUP_P2, message: `${p2Name}, set your secret` };
       }
       
       const p1Len = prev.player1History.length;
       const p2Len = prev.player2History.length;
       
+      // Determine whose turn it is next
       const nextTurn = p1Len > p2Len ? GamePhase.TURN_P2 : GamePhase.TURN_P1;
       const playerName = nextTurn === GamePhase.TURN_P1 ? p1Name : p2Name;
 
       return { 
         ...prev, 
         phase: nextTurn, 
-        message: `${playerName} Turn`, 
+        message: `${playerName}'s Turn`, 
         timeLeft: config.timeLimit 
       };
     });
@@ -310,6 +310,9 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const getLastGuess = () => {
     const p1Len = gameState.player1History.length;
     const p2Len = gameState.player2History.length;
+    // The transition happens *after* a guess is submitted, 
+    // so the last guess belongs to the history that was just updated.
+    // If P1 has more guesses, they just went. If equal and P2 has guesses, P2 just went.
     if (p1Len > p2Len) return gameState.player1History[p1Len - 1];
     if (p2Len > 0) return gameState.player2History[p2Len - 1];
     return null;
@@ -322,16 +325,16 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       {/* Result Modal Overlay */}
       {showResultModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-black/70 backdrop-blur-md animate-fade-in">
-          <div className={`bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border-4 flex flex-col items-center p-8 text-center space-y-6 ${(isWinnerP1 || is2PMode) ? 'animate-celebrate animate-rainbow' : 'animate-shake border-gray-300 shadow-red-500/20'}`}>
+          <div className={`bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border-4 flex flex-col items-center p-8 text-center space-y-6 ${(isWinnerP1 || is2PMode) ? 'animate-celebrate animate-rainbow border-green-400' : 'animate-shake border-red-300 shadow-red-500/20'}`}>
             <div className={(isWinnerP1 || is2PMode) ? 'animate-float' : ''}>
                <div className="text-6xl mb-2">{(isWinnerP1 || is2PMode) ? '🏆' : '💀'}</div>
-               <h1 className={`text-4xl font-black tracking-tighter ${ (isWinnerP1 || is2PMode) ? 'text-gray-900' : 'text-red-600 uppercase' }`}>
+               <h1 className={`text-4xl font-black tracking-tighter ${ (isWinnerP1 || is2PMode) ? 'text-green-600' : 'text-red-600 uppercase' }`}>
                  {(isWinnerP1 || is2PMode) ? 'WINNER!' : 'CRACKED!'}
                </h1>
             </div>
             
             <div className="space-y-1">
-              <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">{(isWinnerP1 || is2PMode) ? 'Champion' : 'Defeat by'}</p>
+              <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">{(isWinnerP1 || is2PMode) ? 'CONGRATULATIONS' : 'DEFEATED BY'}</p>
               <p className={`text-3xl font-black truncate max-w-full ${ (isWinnerP1 || is2PMode) ? 'text-blue-600' : 'text-gray-900'}`}>
                 {gameState.winner}
               </p>
@@ -367,15 +370,15 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       {gameState.phase === GamePhase.TRANSITION && (
         <div className="absolute inset-0 z-40 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-fade-in">
           <div className="bg-blue-600 rounded-3xl w-full max-w-xs p-8 text-center shadow-2xl border-4 border-white/20 text-white animate-slide-in">
-            <h3 className="text-3xl font-black mb-2 uppercase tracking-tight">TURN COMPLETE</h3>
+            <h3 className="text-3xl font-black mb-2 uppercase tracking-tight">TURN OVER</h3>
             
             {lastMove && (
                <div className="mb-8 p-4 bg-white/10 rounded-2xl border border-white/20">
-                  <p className="text-[10px] font-black opacity-60 uppercase tracking-widest mb-1">Last Guess Result</p>
+                  <p className="text-[10px] font-black opacity-60 uppercase tracking-widest mb-1">Result of Guess</p>
                   <div className="flex items-center justify-center gap-6">
                      <div className="text-center">
                         <div className="text-4xl font-black">{lastMove.guess}</div>
-                        <div className="text-[8px] font-bold opacity-50 uppercase">Sequence</div>
+                        <div className="text-[8px] font-bold opacity-50 uppercase">Input</div>
                      </div>
                      <div className="w-px h-10 bg-white/20"></div>
                      <div className="flex gap-4">
@@ -392,7 +395,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
                </div>
             )}
 
-            <p className="mb-8 font-bold opacity-80 uppercase tracking-widest text-sm">Pass the device to your opponent</p>
+            <p className="mb-8 font-bold opacity-80 uppercase tracking-widest text-sm">Pass device to your opponent</p>
             <Button variant="secondary" fullWidth onClick={handleTransition} className="h-16 text-xl shadow-lg border-2 border-orange-400">
               I AM {gameState.player1History.length > gameState.player2History.length ? p2Name : p1Name}
             </Button>
@@ -403,7 +406,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       {/* Header */}
       <div className="bg-white border-b border-gray-200 p-4 shadow-sm z-10 flex-none relative">
         <div className="flex justify-between items-center mb-1">
-          <Button variant="ghost" onClick={onExit} className="!p-0 !min-h-0 text-gray-400 text-xs font-black uppercase">Menu</Button>
+          <Button variant="ghost" onClick={onExit} className="!p-0 !min-h-0 text-gray-400 text-xs font-black uppercase">Exit</Button>
           <div className="flex flex-col items-end">
             <div className="text-[10px] font-black text-gray-400 tracking-widest uppercase">
               {config.mode} • {config.n}N
@@ -420,14 +423,14 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
         </h2>
       </div>
 
-      {/* Game Content */}
-      <div className="flex-1 flex flex-row overflow-hidden relative">
+      {/* Game Content - Background visibility depends on pointer-events when popups are active */}
+      <div className={`flex-1 flex flex-row overflow-hidden relative ${(gameState.phase === GamePhase.TRANSITION || showResultModal) ? 'pointer-events-none grayscale-[0.2] blur-[1px]' : ''}`}>
         <div className="flex-1 flex flex-col border-r border-gray-100">
-          <div className="p-2 bg-blue-50/50 text-center text-[8px] font-black text-blue-400 uppercase tracking-widest">{p1Name} Guesses</div>
+          <div className="p-2 bg-blue-50/50 text-center text-[8px] font-black text-blue-400 uppercase tracking-widest">{p1Name}</div>
           <MoveHistory history={gameState.player1History} n={config.n} />
         </div>
         <div className="flex-1 flex flex-col bg-gray-50/30">
-          <div className="p-2 bg-gray-100/50 text-center text-[8px] font-black text-gray-400 uppercase tracking-widest">{p2Name} Guesses</div>
+          <div className="p-2 bg-gray-100/50 text-center text-[8px] font-black text-gray-400 uppercase tracking-widest">{p2Name}</div>
           <MoveHistory history={gameState.player2History} n={config.n} />
         </div>
       </div>
@@ -445,19 +448,19 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
             disabled={isAiThinking}
             showSubmit={true}
             canSubmit={input.length === config.n}
-            submitLabel={isSetup ? "SET SECRET" : "SUBMIT GUESS"}
+            submitLabel={isSetup ? "CONFIRM SECRET" : "SUBMIT GUESS"}
           />
         </div>
       )}
 
-      {/* Review History / Game Over state */}
+      {/* Review History / Game Over controls */}
       {(gameState.phase === GamePhase.GAME_OVER || isReviewingHistory) && (
         <div className="p-6 bg-white border-t border-gray-200 flex flex-col gap-3 pb-safe">
           <Button fullWidth onClick={handlePlayAgain} variant="primary" className="h-14 !text-lg shadow-md uppercase tracking-tighter">
-            Play Again
+            New Match
           </Button>
-          {(gameState.phase === GamePhase.GAME_OVER || isReviewingHistory) && !showResultModal && (
-             <Button fullWidth variant="ghost" onClick={() => setShowResultModal(true)} className="text-xs font-black uppercase tracking-widest">View Result Card</Button>
+          {!showResultModal && (
+             <Button fullWidth variant="ghost" onClick={() => setShowResultModal(true)} className="text-xs font-black uppercase tracking-widest">Back to Results</Button>
           )}
           <Button fullWidth variant="ghost" onClick={onExit} className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Exit to Menu</Button>
         </div>
