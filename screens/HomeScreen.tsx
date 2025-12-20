@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { GameConfig, GameMode, User, LobbyEntry } from '../types';
-import { listenToAvailableMatches, hostMatchInLobby, joinMatchByCode, leaveLobby, updateHeartbeat } from '../utils/network';
+import { listenToAvailableMatches, hostMatchInLobby, joinMatchByCode, leaveLobby, updateHeartbeat, listenToLobbyStatus } from '../utils/network';
 import Button from '../components/Button';
 
 interface HomeScreenProps {
@@ -31,9 +30,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
   // Online State
   const [availableMatches, setAvailableMatches] = useState<LobbyEntry[]>([]);
   const [joinCodeInput, setJoinCodeInput] = useState('');
-  const [isHosting, setIsHosting] = useState(false);
+  const [hostedMatch, setHostedMatch] = useState<{ matchId: string, joinCode: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
+  
   const heartbeatRef = useRef<any>(null);
+  const statusUnsubRef = useRef<any>(null);
 
   // Lobby Match Listener
   useEffect(() => {
@@ -49,6 +51,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
         return () => {
             clearInterval(heartbeatRef.current);
             unsub();
+            if (statusUnsubRef.current) statusUnsubRef.current();
             leaveLobby(user.username);
         };
     }
@@ -72,56 +75,70 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
 
   const handleHostMatch = async () => {
     setError(null);
-    setIsHosting(true);
+    setIsBusy(true);
     try {
-        const { joinCode } = await hostMatchInLobby(
+        const result = await hostMatchInLobby(
             { username: user.username, userId: user.contact },
             { n: selectedN, timeLimit: selectedTime }
         );
-        onStartGame({
-            mode: GameMode.ONLINE,
-            n: selectedN,
-            timeLimit: selectedTime,
-            matchCode: joinCode,
-            role: 'HOST'
+        setHostedMatch(result);
+        
+        // Listen for player arrival
+        statusUnsubRef.current = listenToLobbyStatus(result.matchId, (status) => {
+            if (status === 'playing') {
+                onStartGame({
+                    mode: GameMode.ONLINE,
+                    n: selectedN,
+                    timeLimit: selectedTime,
+                    matchCode: result.matchId, // Using matchId for adapter
+                    role: 'HOST'
+                });
+            }
         });
     } catch (err: any) {
         setError(err.message);
-        setIsHosting(false);
+    } finally {
+        setIsBusy(false);
     }
   };
 
   const handleJoinByCode = async () => {
-      if (joinCodeInput.length < 4) return;
+      const code = joinCodeInput.trim().toUpperCase();
+      if (code.length < 6) return;
       setError(null);
+      setIsBusy(true);
       try {
-          await joinMatchByCode(joinCodeInput, user.username);
+          const { matchId, config } = await joinMatchByCode(code);
           onStartGame({
               mode: GameMode.ONLINE,
-              // Fix: Explicitly cast to fix type mismatch error on literals
-              n: 4 as 2 | 3 | 4, 
-              timeLimit: 30 as 30 | 60 | 90,
-              matchCode: joinCodeInput,
+              n: config.n, 
+              timeLimit: config.timeLimit,
+              matchCode: matchId,
               role: 'GUEST'
           });
       } catch (err: any) {
           setError(err.message);
+      } finally {
+          setIsBusy(false);
       }
   };
 
   const handleJoinFromList = async (match: LobbyEntry) => {
       setError(null);
+      setIsBusy(true);
       try {
-          await joinMatchByCode(match.joinCode, user.username);
+          await joinMatchByCode(match.joinCode);
           onStartGame({
               mode: GameMode.ONLINE,
               n: match.n,
               timeLimit: match.timeLimit,
-              matchCode: match.joinCode,
+              matchCode: match.matchId,
               role: 'GUEST'
           });
       } catch (err: any) {
           setError(err.message);
+      } finally {
+          setIsBusy(false);
       }
   };
 
@@ -194,56 +211,75 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
 
       {step === 'online-lobby' && (
         <div className="space-y-4 w-full h-full flex flex-col animate-slide-in overflow-hidden">
-          <h2 className="text-xl font-bold text-center mb-2 flex-none uppercase tracking-tighter">ONLINE LOBBY</h2>
-          
-          <div className="flex-1 overflow-y-auto bg-gray-50 rounded-2xl border border-gray-100 p-3 mb-4 space-y-3">
-              <div className="flex items-center justify-between px-1">
-                <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Available Matches</span>
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              </div>
-
-              {availableMatches.length === 0 ? (
-                  <div className="text-center py-10 px-4">
-                      <p className="text-gray-400 text-sm font-bold">NO MATCHES FOUND</p>
-                      <p className="text-[10px] text-gray-300 uppercase mt-1">Host one to start playing!</p>
-                  </div>
-              ) : (
-                  availableMatches.map(match => (
-                      <div key={match.matchId} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center animate-slide-in">
-                          <div>
-                              <p className="font-black text-gray-900">{match.hostUsername}</p>
-                              <div className="flex gap-2 mt-1">
-                                <span className="text-[8px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded uppercase">{match.n} Digits</span>
-                                <span className="text-[8px] font-bold bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded uppercase">{match.timeLimit}s</span>
-                              </div>
-                          </div>
-                          <Button variant="primary" className="!py-1 !px-4 !text-xs !min-h-[32px]" onClick={() => handleJoinFromList(match)}>JOIN</Button>
-                      </div>
-                  ))
-              )}
-          </div>
-
-          <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex-none space-y-4">
-             {error && <p className="text-red-500 text-[10px] font-black text-center uppercase">{error}</p>}
-             <div className="flex gap-2">
-               <input 
-                 type="text" 
-                 value={joinCodeInput}
-                 onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase().slice(0, 4))}
-                 placeholder="ENTER CODE"
-                 className="flex-1 p-3 border border-gray-200 rounded-xl font-mono font-black text-center tracking-widest text-lg focus:ring-2 focus:ring-blue-500 outline-none"
-               />
-               <Button onClick={handleJoinByCode} disabled={joinCodeInput.length < 4} className="min-w-[80px]">JOIN</Button>
+          {hostedMatch ? (
+             <div className="flex-1 flex flex-col items-center justify-center space-y-8 animate-slide-in">
+                <div className="text-center">
+                    <h3 className="text-2xl font-black uppercase tracking-tighter">Match Hosted</h3>
+                    <p className="text-gray-500 text-sm">Waiting for opponent...</p>
+                </div>
+                <div className="bg-blue-600 text-white p-8 rounded-3xl shadow-xl border-4 border-blue-400 text-center scale-110">
+                    <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-2">Join Code</p>
+                    <p className="text-5xl font-black tracking-widest font-mono">{hostedMatch.joinCode}</p>
+                </div>
+                <div className="w-full max-w-xs space-y-4">
+                    <p className="text-xs text-center text-gray-400 italic">Share this code with a friend to play across devices.</p>
+                    <Button fullWidth variant="ghost" onClick={() => setHostedMatch(null)}>CANCEL HOSTING</Button>
+                </div>
              </div>
-             <div className="w-full flex items-center gap-2 py-1">
-                <div className="flex-1 h-px bg-gray-100"></div>
-                <span className="text-[8px] font-black text-gray-300 uppercase">OR</span>
-                <div className="flex-1 h-px bg-gray-100"></div>
-             </div>
-             <Button fullWidth onClick={() => setStep('settings')} variant="secondary" className="h-14">HOST NEW MATCH</Button>
-          </div>
-          
-          <Button fullWidth variant="ghost" onClick={() => setStep('mode')} className="flex-none">BACK</Button>
+          ) : (
+            <>
+                <h2 className="text-xl font-bold text-center mb-2 flex-none uppercase tracking-tighter">ONLINE LOBBY</h2>
+                
+                <div className="flex-1 overflow-y-auto bg-gray-50 rounded-2xl border border-gray-100 p-3 mb-4 space-y-3">
+                    <div className="flex items-center justify-between px-1">
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Available Matches</span>
+                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    </div>
+
+                    {availableMatches.length === 0 ? (
+                        <div className="text-center py-10 px-4">
+                            <p className="text-gray-400 text-sm font-bold">NO PUBLIC MATCHES</p>
+                            <p className="text-[10px] text-gray-300 uppercase mt-1">Host one to start playing!</p>
+                        </div>
+                    ) : (
+                        availableMatches.map(match => (
+                            <div key={match.matchId} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center animate-slide-in">
+                                <div>
+                                    <p className="font-black text-gray-900">{match.hostUsername}</p>
+                                    <div className="flex gap-2 mt-1">
+                                        <span className="text-[8px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded uppercase">{match.n}N</span>
+                                        <span className="text-[8px] font-bold bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded uppercase">{match.timeLimit}s</span>
+                                    </div>
+                                </div>
+                                <Button variant="primary" disabled={isBusy} className="!py-1 !px-4 !text-xs !min-h-[32px]" onClick={() => handleJoinFromList(match)}>JOIN</Button>
+                            </div>
+                        ))
+                    )}
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex-none space-y-4">
+                    {error && <p className="text-red-500 text-[10px] font-black text-center uppercase mb-2 animate-shake">{error}</p>}
+                    <div className="flex gap-2">
+                    <input 
+                        type="text" 
+                        value={joinCodeInput}
+                        onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase().slice(0, 6))}
+                        placeholder="ABC123"
+                        className="flex-1 p-3 border border-gray-200 rounded-xl font-mono font-black text-center tracking-widest text-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                    <Button onClick={handleJoinByCode} disabled={joinCodeInput.length < 6 || isBusy} className="min-w-[80px]">JOIN</Button>
+                    </div>
+                    <div className="w-full flex items-center gap-2 py-1">
+                        <div className="flex-1 h-px bg-gray-100"></div>
+                        <span className="text-[8px] font-black text-gray-300 uppercase">OR</span>
+                        <div className="flex-1 h-px bg-gray-100"></div>
+                    </div>
+                    <Button fullWidth onClick={() => setStep('settings')} variant="secondary" className="h-14">HOST PRIVATE MATCH</Button>
+                </div>
+                
+                <Button fullWidth variant="ghost" onClick={() => setStep('mode')} className="flex-none">BACK</Button>
+            </>
+          )}
         </div>
       )}
 
@@ -277,7 +313,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
           </div>
 
           <div className="pt-4 space-y-3">
-            <Button fullWidth onClick={selectedMode === GameMode.ONLINE ? handleHostMatch : handleStartLocalMatch} variant="primary">
+            <Button fullWidth onClick={selectedMode === GameMode.ONLINE ? handleHostMatch : handleStartLocalMatch} variant="primary" disabled={isBusy}>
                 {selectedMode === GameMode.ONLINE ? 'CREATE PUBLIC LOBBY' : 'START MATCH'}
             </Button>
             <Button fullWidth variant="ghost" onClick={() => setStep(selectedMode === GameMode.ONLINE ? 'online-lobby' : 'mode')}>BACK</Button>
@@ -285,7 +321,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
         </div>
       )}
       
-      <div className="mt-auto text-center text-[8px] text-gray-300 py-4 font-black uppercase tracking-widest">v1.3.1</div>
+      <div className="mt-auto text-center text-[8px] text-gray-300 py-4 font-black uppercase tracking-widest">v1.4.0</div>
     </div>
   );
 };

@@ -1,4 +1,3 @@
-
 import { db } from './firebase';
 import { ref, set, onValue, onDisconnect, remove, get, update, runTransaction } from 'firebase/database';
 import { LobbyUser, LobbyEntry, GameConfig } from '../types';
@@ -6,22 +5,23 @@ import { LobbyUser, LobbyEntry, GameConfig } from '../types';
 type NetworkEventCallback = (data: any) => void;
 
 export class NetworkAdapter {
-  private matchCode: string;
+  private matchId: string;
   private userId: string;
   private onMessage: NetworkEventCallback;
   private matchRef: any;
   private unsubscribe: (() => void) | null = null;
 
-  constructor(matchCode: string, userId: string, onMessage: NetworkEventCallback) {
-    this.matchCode = matchCode;
+  constructor(matchId: string, userId: string, onMessage: NetworkEventCallback) {
+    this.matchId = matchId;
     this.userId = userId;
     this.onMessage = onMessage;
     
     if (db) {
-      this.matchRef = ref(db, `matches/${matchCode}`);
+      this.matchRef = ref(db, `matches/${matchId}`);
       this.unsubscribe = onValue(this.matchRef, (snapshot) => {
         const val = snapshot.val();
         if (val && val.lastMessage) {
+          // Only process messages from the other player and that are recent
           if (val.lastMessage.from !== this.userId && val.lastMessage.timestamp > (Date.now() - 60000)) {
              this.onMessage(val.lastMessage);
           }
@@ -41,21 +41,28 @@ export class NetworkAdapter {
   }
 }
 
+// Helper for 6-char alphanumeric code
+const generateJoinCode = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+    return code;
+};
+
 // --- Online Lobby System ---
 
 export const hostMatchInLobby = async (hostUser: { username: string, userId: string }, config: { n: number, timeLimit: number }) => {
-    if (!db) throw new Error("Database not connected");
+    if (!db) throw new Error("Firebase not configured. Check your environment variables.");
     
     const matchId = `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const joinCode = Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit code
+    const joinCode = generateJoinCode();
     
-    const expiresAt = new Date(Date.now() + 15 * 60000).toISOString(); // 15 min TTL
+    const expiresAt = new Date(Date.now() + 30 * 60000).toISOString(); // 30 min TTL
     
     const lobbyEntry: LobbyEntry = {
         matchId,
         hostUserId: hostUser.userId,
         hostUsername: hostUser.username,
-        // Fix: Explicitly cast to union types to fix potential type mismatch errors
         n: config.n as 2 | 3 | 4,
         timeLimit: config.timeLimit as 30 | 60 | 90,
         createdAt: new Date().toISOString(),
@@ -67,7 +74,7 @@ export const hostMatchInLobby = async (hostUser: { username: string, userId: str
     const updates: any = {};
     updates[`lobby/${matchId}`] = lobbyEntry;
     updates[`joinCodes/${joinCode}`] = { matchId, expiresAt };
-    updates[`matches/${matchId}/config`] = { ...config, matchCode: joinCode, role: 'HOST' };
+    updates[`matches/${matchId}/config`] = { ...config, matchId, role: 'HOST' };
     
     await update(ref(db), updates);
 
@@ -78,29 +85,36 @@ export const hostMatchInLobby = async (hostUser: { username: string, userId: str
     return { matchId, joinCode };
 };
 
-export const joinMatchByCode = async (code: string, username: string) => {
-    if (!db) throw new Error("Database not connected");
+export const joinMatchByCode = async (code: string) => {
+    if (!db) throw new Error("Firebase not configured.");
     
     const codeRef = ref(db, `joinCodes/${code}`);
     const snapshot = await get(codeRef);
-    if (!snapshot.exists()) throw new Error("Invalid or expired code");
+    if (!snapshot.exists()) throw new Error("Invalid or expired match code.");
 
     const { matchId } = snapshot.val();
     
-    // Use transaction to ensure only one guest joins
-    const result = await runTransaction(ref(db, `lobby/${matchId}`), (current) => {
+    // Transaction to ensure only one guest joins
+    const lobbyRef = ref(db, `lobby/${matchId}`);
+    const result = await runTransaction(lobbyRef, (current) => {
         if (!current) return null;
         if (current.status !== 'waiting_for_opponent') return; // abort
         return { ...current, status: 'playing' };
     });
 
-    if (!result.committed) throw new Error("Match is full or unavailable");
+    if (!result.committed || !result.snapshot.exists()) {
+        throw new Error("Match is full or no longer available.");
+    }
 
-    // Cleanup lobby entry and join code once joined
+    // Fetch config to return to guest
+    const configSnapshot = await get(ref(db, `matches/${matchId}/config`));
+    const config = configSnapshot.val();
+
+    // Cleanup lobby tracking now that match started
     await remove(codeRef);
-    await remove(ref(db, `lobby/${matchId}`));
+    await remove(lobbyRef);
 
-    return { matchId };
+    return { matchId, config };
 };
 
 export const listenToAvailableMatches = (callback: (entries: LobbyEntry[]) => void) => {
@@ -114,18 +128,19 @@ export const listenToAvailableMatches = (callback: (entries: LobbyEntry[]) => vo
                 if (entry.status === 'waiting_for_opponent') entries.push(entry);
             });
         }
-        // Sort by newest first
         entries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         callback(entries);
     });
 };
 
-// Legacy support
-export const joinLobby = (user: LobbyUser) => {
-    if (!db) return;
-    const userRef = ref(db, `users/${user.username}`);
-    set(userRef, { ...user, lastSeen: Date.now() });
-    onDisconnect(userRef).remove();
+export const listenToLobbyStatus = (matchId: string, callback: (status: string) => void) => {
+    if (!db) return () => {};
+    const statusRef = ref(db, `lobby/${matchId}/status`);
+    return onValue(statusRef, (snapshot) => {
+        if (snapshot.exists()) {
+            callback(snapshot.val());
+        }
+    });
 };
 
 export const updateHeartbeat = (username: string) => {
@@ -136,18 +151,4 @@ export const updateHeartbeat = (username: string) => {
 export const leaveLobby = (username: string) => {
     if (!db) return;
     remove(ref(db, `users/${username}`));
-};
-
-export const listenForInvites = (username: string, callback: (invite: any) => void) => {
-    if (!db) return () => {};
-    const invitesRef = ref(db, `invites/${username}`);
-    return onValue(invitesRef, (snapshot) => {
-        const val = snapshot.val();
-        if (val) {
-            const firstKey = Object.keys(val)[0];
-            const invite = val[firstKey];
-            callback(invite);
-            remove(ref(db, `invites/${username}/${firstKey}`));
-        }
-    });
 };
