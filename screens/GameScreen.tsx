@@ -39,7 +39,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       player2History: [],
       message: `${p1Name}, set your secret`,
       winner: null,
-      opponentName: config.secondPlayerName || 'Opponent',
+      opponentName: config.secondPlayerName || (config.mode === GameMode.SINGLE_PLAYER ? 'CPU' : 'Opponent'),
       timeLeft: config.timeLimit
     };
   });
@@ -50,14 +50,32 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const isPlayer1Turn = gameState.phase === GamePhase.TURN_P1;
   const isPlayer2Turn = gameState.phase === GamePhase.TURN_P2;
 
-  // KEYPAD LOGIC FOR ONLINE
-  const isMyTurn = config.mode !== GameMode.ONLINE || 
-    (isSetup && ((config.role === 'HOST' && !gameState.player1Secret) || (config.role === 'GUEST' && !gameState.player2Secret))) ||
-    (isPlayer1Turn && config.role === 'HOST') ||
-    (isPlayer2Turn && config.role === 'GUEST');
+  // KEYPAD LOGIC
+  const isMyTurn = 
+    (gameState.phase === GamePhase.SETUP_P1) ||
+    (gameState.phase === GamePhase.SETUP_P2 && config.mode === GameMode.TWO_PLAYER) ||
+    (isPlayer1Turn && (config.mode !== GameMode.ONLINE || config.role === 'HOST')) ||
+    (isPlayer2Turn && config.mode === GameMode.TWO_PLAYER) ||
+    (isPlayer2Turn && config.mode === GameMode.ONLINE && config.role === 'GUEST');
   
   const currentHistory = isPlayer1Turn ? gameState.player1History : gameState.player2History;
   const timerActive = (isPlayer1Turn || isPlayer2Turn) && currentHistory.length > 0 && !isAiThinking && gameState.phase !== GamePhase.GAME_OVER;
+
+  // AI Logic
+  useEffect(() => {
+    if (config.mode === GameMode.SINGLE_PLAYER && gameState.phase === GamePhase.TURN_P2 && !gameState.winner) {
+      setIsAiThinking(true);
+      const thinkTime = 1500 + Math.random() * 2000;
+      
+      const timeout = setTimeout(() => {
+        const aiGuess = generateRandomSecret(config.n);
+        processGuess(aiGuess);
+        setIsAiThinking(false);
+      }, thinkTime);
+
+      return () => clearTimeout(timeout);
+    }
+  }, [gameState.phase, config.mode, config.n]);
 
   // Network Initialization
   useEffect(() => {
@@ -66,7 +84,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
             handleNetworkMessage(msg);
         });
 
-        // Guest joins and immediately identifies self to host
         if (config.role === 'GUEST') {
             networkRef.current.send('IDENTITY_EXCHANGE', { username: user.username });
         }
@@ -136,7 +153,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     if (gameState.phase === GamePhase.GAME_OVER && !showResultModal && !isReviewingHistory && gameState.winner !== null) {
       setShowResultModal(true);
     }
-  }, [gameState.phase, gameState.winner, showResultModal, isReviewingHistory, gameState]);
+  }, [gameState.phase, gameState.winner, showResultModal, isReviewingHistory]);
 
   // Timer logic
   useEffect(() => {
@@ -179,20 +196,20 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
               newState.message = "Waiting for opponent...";
           }
       } else {
-          // Local modes
           if (prev.phase === GamePhase.SETUP_P1) {
+            newState.player1Secret = input;
             if (config.mode === GameMode.SINGLE_PLAYER) {
-                newState.player1Secret = input;
                 newState.player2Secret = generateRandomSecret(config.n);
                 newState.phase = GamePhase.TURN_P1;
                 newState.message = `${p1Name}'s Turn`;
             } else {
-                newState.player1Secret = input;
                 newState.phase = GamePhase.TRANSITION;
+                newState.message = `Pass to ${p2Name}`;
             }
-          } else {
+          } else if (prev.phase === GamePhase.SETUP_P2) {
               newState.player2Secret = input;
               newState.phase = GamePhase.TURN_P1;
+              newState.message = `${p1Name}'s Turn`;
           }
       }
       return newState;
@@ -200,26 +217,19 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     setInput('');
   };
 
-  const submitGuess = () => {
-    const valid = validateSequence(input, config.n);
-    if (!valid.valid) return alert(valid.error);
-
-    if (config.mode === GameMode.ONLINE) {
-        networkRef.current?.send('GUESS_SUBMITTED', { guess: input });
-    }
-    
-    const isP1 = gameState.phase === GamePhase.TURN_P1;
-    const targetSecret = isP1 ? gameState.player2Secret : gameState.player1Secret;
-    const result = computeOnAndOrder(targetSecret, input);
-    const guessResult = { ...result, guess: input, timestamp: new Date().toISOString() };
-
+  const processGuess = (guess: string) => {
     setGameState(prev => {
+      const isP1 = prev.phase === GamePhase.TURN_P1;
+      const targetSecret = isP1 ? prev.player2Secret : prev.player1Secret;
+      const result = computeOnAndOrder(targetSecret, guess);
+      const guessResult = { ...result, guess, timestamp: new Date().toISOString() };
+
       const historyKey = isP1 ? 'player1History' : 'player2History';
       const newHistory = [...prev[historyKey], guessResult];
       const won = result.order === config.n;
       
       if (won) {
-        const winner = isP1 ? p1Name : p2Name;
+        const winner = isP1 ? p1Name : (prev.opponentName || 'Opponent');
         clearActiveSession();
         saveMatchRecord({
           id: prev.matchId,
@@ -243,16 +253,36 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       }
 
       const nextPhase = isP1 ? GamePhase.TURN_P2 : GamePhase.TURN_P1;
+      const nextPlayerName = nextPhase === GamePhase.TURN_P1 ? p1Name : (prev.opponentName || 'Opponent');
       
       return {
         ...prev,
         [historyKey]: newHistory,
         phase: nextPhase,
-        message: `${nextPhase === GamePhase.TURN_P1 ? p1Name : p2Name}'s Turn`,
+        message: `${nextPlayerName}'s Turn`,
         timeLeft: config.timeLimit
       };
     });
+  };
+
+  const submitGuess = () => {
+    const valid = validateSequence(input, config.n);
+    if (!valid.valid) return alert(valid.error);
+
+    if (config.mode === GameMode.ONLINE) {
+        networkRef.current?.send('GUESS_SUBMITTED', { guess: input });
+    }
+    
+    processGuess(input);
     setInput('');
+  };
+
+  const startP2Setup = () => {
+    setGameState(prev => ({
+      ...prev,
+      phase: GamePhase.SETUP_P2,
+      message: `${p2Name}, set your secret`
+    }));
   };
 
   const isUserWinner = gameState.winner === user.username;
@@ -269,7 +299,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
             <p className="text-2xl font-black text-blue-600 truncate">{gameState.winner}</p>
             <div className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100">
               <p className="text-[10px] font-black text-gray-400 uppercase mb-2 tracking-widest">Enemy Secret Was</p>
-              <p className="text-4xl font-mono font-black">{config.role === 'HOST' ? gameState.player2Secret : gameState.player1Secret}</p>
+              <p className="text-4xl font-mono font-black">{config.role === 'GUEST' ? gameState.player1Secret : gameState.player2Secret}</p>
             </div>
             <div className="space-y-3">
               <Button fullWidth onClick={() => onRestart(config)} variant="primary">PLAY AGAIN</Button>
@@ -301,6 +331,16 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
         </div>
       </div>
 
+      {/* Transition Screen for Local 2P */}
+      {gameState.phase === GamePhase.TRANSITION && (
+        <div className="absolute inset-x-0 bottom-0 top-[88px] bg-white/95 backdrop-blur-sm z-20 flex flex-col items-center justify-center p-8 text-center space-y-6">
+          <div className="text-6xl animate-bounce">📱</div>
+          <h3 className="text-2xl font-black uppercase">Pass the Device</h3>
+          <p className="text-gray-500 font-medium">It is now <span className="text-blue-600 font-bold">{p2Name}'s</span> turn to set a secret.</p>
+          <Button fullWidth onClick={startP2Setup} className="max-w-xs">I AM {p2Name.toUpperCase()}</Button>
+        </div>
+      )}
+
       {/* Bottom Area */}
       {gameState.phase === GamePhase.GAME_OVER && isReviewingHistory ? (
          <div className="p-4 bg-white border-t border-gray-200 pb-safe flex gap-2">
@@ -309,18 +349,31 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
          </div>
       ) : !showResultModal && gameState.phase !== GamePhase.TRANSITION && (
         <div className="bg-white border-t border-gray-200 p-2 pb-safe flex-none">
-          <InputDisplay length={config.n} value={input} isSecret={isSetup} />
-          <Keypad 
-            onDigitPress={handleDigitPress} 
-            onDelete={() => setInput(p => p.slice(0,-1))} 
-            onClear={() => setInput('')}
-            onSubmit={isSetup ? submitSecret : submitGuess}
-            disabledDigits={new Set(input.split(''))}
-            disabled={!isMyTurn || isAiThinking}
-            showSubmit={true}
-            canSubmit={input.length === config.n}
-            submitLabel={isSetup ? "CONFIRM SECRET" : "SUBMIT GUESS"}
-          />
+          {isAiThinking ? (
+            <div className="h-[280px] flex flex-col items-center justify-center space-y-4">
+              <div className="flex space-x-2">
+                <div className="w-3 h-3 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
+                <div className="w-3 h-3 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                <div className="w-3 h-3 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+              </div>
+              <p className="text-xs font-black text-gray-400 uppercase tracking-widest">CPU is thinking...</p>
+            </div>
+          ) : (
+            <>
+              <InputDisplay length={config.n} value={input} isSecret={isSetup} />
+              <Keypad 
+                onDigitPress={handleDigitPress} 
+                onDelete={() => setInput(p => p.slice(0,-1))} 
+                onClear={() => setInput('')}
+                onSubmit={isSetup ? submitSecret : submitGuess}
+                disabledDigits={new Set(input.split(''))}
+                disabled={!isMyTurn}
+                showSubmit={true}
+                canSubmit={input.length === config.n}
+                submitLabel={isSetup ? "CONFIRM SECRET" : "SUBMIT GUESS"}
+              />
+            </>
+          )}
         </div>
       )}
     </div>
