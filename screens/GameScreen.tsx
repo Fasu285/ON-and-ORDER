@@ -362,7 +362,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
                 PLAY AGAIN
               </Button>
               <Button fullWidth onClick={() => { setShowResultModal(false); setIsReviewingHistory(true); }} variant="secondary" className="h-12 text-sm font-black uppercase tracking-widest">
-                REVIEW RECAP
+                VIEW RECAP
               </Button>
               <Button fullWidth onClick={onExit} variant="ghost" className="h-10 text-xs font-bold text-gray-400 uppercase tracking-widest">
                 Main Menu
@@ -466,7 +466,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
             New Match
           </Button>
           {!showResultModal && (
-             <Button fullWidth variant="ghost" onClick={() => setShowResultModal(true)} className="text-xs font-black uppercase tracking-widest">VIEW RECAP</Button>
+             <Button fullWidth variant="ghost" onClick={() => setShowResultModal(true)} className="text-xs font-black uppercase tracking-widest">BACK TO RESULT</Button>
           )}
           <Button fullWidth variant="ghost" onClick={onExit} className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Exit to Menu</Button>
         </div>

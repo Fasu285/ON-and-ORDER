@@ -269,16 +269,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
           </Button>
           
           <Button fullWidth variant={hasActiveGame ? "ghost" : "secondary"} onClick={onViewHistory}>
-            MATCH RECAP
+            MATCHES HISTORY
           </Button>
-          <Button fullWidth variant="ghost" onClick={runDiagnostics}>
-            RUN DIAGNOSTICS
-          </Button>
-          {testResults && (
-            <div className="mt-4 p-3 bg-gray-100 rounded text-xs font-mono text-center">
-              {testResults}
-            </div>
-          )}
         </div>
       )}
 

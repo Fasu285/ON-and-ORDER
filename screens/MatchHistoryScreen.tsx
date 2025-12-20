@@ -34,7 +34,7 @@ const MatchHistoryScreen: React.FC<MatchHistoryScreenProps> = ({ onBack }) => {
         <div className="absolute inset-0 z-50 flex flex-col bg-white animate-fade-in overflow-hidden">
           <div className="bg-white border-b border-gray-200 p-4 shadow-sm flex justify-between items-center flex-none">
              <div>
-                <h2 className="text-xl font-black text-gray-900 leading-none">MATCH RECAP</h2>
+                <h2 className="text-xl font-black text-gray-900 leading-none">MATCHES HISTORY</h2>
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">
                    {selectedRecord.mode} • {selectedRecord.n}N • {new Date(selectedRecord.timestamp).toLocaleDateString()}
                 </p>
@@ -82,7 +82,7 @@ const MatchHistoryScreen: React.FC<MatchHistoryScreenProps> = ({ onBack }) => {
 
       <div className="bg-white border-b border-gray-200 p-4 shadow-sm z-10 sticky top-0">
          <div className="flex justify-between items-center">
-            <h1 className="text-2xl font-black text-gray-900 tracking-tighter">MATCH RECAP</h1>
+            <h1 className="text-2xl font-black text-gray-900 tracking-tighter">MATCHES HISTORY</h1>
             <Button variant="ghost" onClick={onBack} className="!p-2 min-h-0 h-10">
               CLOSE
             </Button>
