@@ -20,6 +20,11 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [showResultModal, setShowResultModal] = useState(false);
   const [isReviewingHistory, setIsReviewingHistory] = useState(false);
+  
+  // Play Again logic states
+  const [playAgainRequest, setPlayAgainRequest] = useState<{ from: string } | null>(null);
+  const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
+
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const networkRef = useRef<NetworkAdapter | null>(null);
 
@@ -82,6 +87,22 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
 
   const handleNetworkMessage = (msg: any) => {
       const { type, payload } = msg;
+      
+      if (type === 'PLAY_AGAIN_REQUEST') {
+          setPlayAgainRequest({ from: payload.username });
+          return;
+      }
+
+      if (type === 'PLAY_AGAIN_RESPONSE') {
+          setIsWaitingForResponse(false);
+          if (payload.accepted) {
+              onRestart(config);
+          } else {
+              alert(`${payload.username} declined the rematch.`);
+          }
+          return;
+      }
+
       setGameState(prev => {
           if (type === 'IDENTITY_EXCHANGE') {
               return { ...prev, opponentName: payload.username };
@@ -275,6 +296,26 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     }));
   };
 
+  const handleRestartClick = () => {
+    if (isOnline) {
+        setIsWaitingForResponse(true);
+        networkRef.current?.send('PLAY_AGAIN_REQUEST', { username: user.username });
+    } else {
+        onRestart(config);
+    }
+  };
+
+  const handleAcceptRematch = () => {
+      networkRef.current?.send('PLAY_AGAIN_RESPONSE', { accepted: true, username: user.username });
+      setPlayAgainRequest(null);
+      onRestart(config);
+  };
+
+  const handleDeclineRematch = () => {
+      networkRef.current?.send('PLAY_AGAIN_RESPONSE', { accepted: false, username: user.username });
+      setPlayAgainRequest(null);
+  };
+
   const isUserWinner = gameState.winner === user.username;
 
   return (
@@ -299,12 +340,46 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
             </div>
 
             <div className="space-y-3 pt-2">
-              <Button fullWidth onClick={() => onRestart(config)} variant="primary" className="h-14">PLAY AGAIN</Button>
+              <Button fullWidth onClick={handleRestartClick} variant="primary" className="h-14" disabled={isWaitingForResponse}>
+                {isWaitingForResponse ? 'WAITING...' : 'PLAY AGAIN'}
+              </Button>
               <Button fullWidth onClick={() => { setShowResultModal(false); setIsReviewingHistory(true); }} variant="secondary">MATCH RECAP</Button>
               <Button fullWidth onClick={onExit} variant="ghost">MAIN MENU</Button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Rematch Request Modal */}
+      {playAgainRequest && (
+        <div className="absolute inset-0 z-[60] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white rounded-3xl w-full max-w-xs p-6 text-center space-y-6 shadow-2xl border-4 border-blue-500">
+                <div className="space-y-2">
+                    <h3 className="text-xl font-black uppercase tracking-tight text-gray-900">Rematch Request</h3>
+                    <p className="text-sm font-medium text-gray-500">
+                        <span className="text-blue-600 font-bold">{playAgainRequest.from}</span> wants to play again the match.
+                    </p>
+                </div>
+                <div className="flex flex-col gap-3">
+                    <Button fullWidth onClick={handleAcceptRematch} variant="primary">ACCEPT</Button>
+                    <Button fullWidth onClick={handleDeclineRematch} variant="ghost">DECLINE</Button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Waiting Overlay */}
+      {isWaitingForResponse && !playAgainRequest && (
+          <div className="absolute inset-0 z-[55] flex items-center justify-center p-6 bg-black/20 backdrop-blur-[2px] animate-fade-in">
+             <div className="bg-white rounded-2xl p-6 shadow-xl border border-gray-100 text-center space-y-4">
+                 <div className="flex justify-center space-x-1">
+                    <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{animationDelay: '0s'}}></div>
+                    <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                    <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                 </div>
+                 <p className="text-xs font-black uppercase tracking-widest text-gray-400">Waiting for opponent to accept...</p>
+             </div>
+          </div>
       )}
 
       {/* Header */}
@@ -354,10 +429,11 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
          <div className="p-4 bg-white border-t border-gray-200 pb-safe flex gap-3 animate-slide-in">
             <Button 
                 fullWidth 
-                onClick={() => onRestart(config)} 
+                onClick={handleRestartClick} 
                 variant="primary"
+                disabled={isWaitingForResponse}
             >
-                {isOnline ? "PLAY AGAIN" : "NEW MATCH"}
+                {isOnline ? (isWaitingForResponse ? "WAITING..." : "PLAY AGAIN") : "NEW MATCH"}
             </Button>
             <Button 
                 fullWidth 
