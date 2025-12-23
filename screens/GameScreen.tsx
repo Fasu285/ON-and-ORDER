@@ -352,8 +352,20 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       {/* Bottom Control Area */}
       {gameState.phase === GamePhase.GAME_OVER && isReviewingHistory ? (
          <div className="p-4 bg-white border-t border-gray-200 pb-safe flex gap-3 animate-slide-in">
-            <Button fullWidth onClick={() => onRestart(config)} variant="primary">NEW MATCH</Button>
-            <Button fullWidth onClick={onExit} variant="ghost">EXIT</Button>
+            <Button 
+                fullWidth 
+                onClick={() => onRestart(config)} 
+                variant="primary"
+            >
+                {isOnline ? "PLAY AGAIN" : "NEW MATCH"}
+            </Button>
+            <Button 
+                fullWidth 
+                onClick={isOnline ? () => { setIsReviewingHistory(false); setShowResultModal(true); } : onExit} 
+                variant="ghost"
+            >
+                {isOnline ? "BACK TO RESULT" : "EXIT"}
+            </Button>
          </div>
       ) : !showResultModal && gameState.phase !== GamePhase.TRANSITION && (
         <div className="bg-white border-t border-gray-200 p-2 pb-safe flex-none">
