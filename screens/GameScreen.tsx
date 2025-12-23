@@ -190,6 +190,13 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     }
   };
 
+  const handleExit = () => {
+    if (isOnline) {
+      clearActiveSession();
+    }
+    onExit();
+  };
+
   const submitSecret = () => {
     const valid = validateSequence(input, config.n);
     if (!valid.valid) return alert(valid.error);
@@ -242,7 +249,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       
       if (won) {
         const winner = isP1 ? p1Name : p2Name;
-        clearActiveSession();
         saveMatchRecord({
           id: prev.matchId,
           timestamp: new Date().toISOString(),
@@ -346,7 +352,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
                 {isWaitingForResponse ? 'WAITING...' : 'PLAY AGAIN'}
               </Button>
               <Button fullWidth onClick={() => { setShowResultModal(false); setIsReviewingHistory(true); }} variant="secondary">MATCH RECAP</Button>
-              <Button fullWidth onClick={onExit} variant="ghost">MAIN MENU</Button>
+              <Button fullWidth onClick={handleExit} variant="ghost">MAIN MENU</Button>
             </div>
           </div>
         </div>
@@ -403,7 +409,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       {/* Header */}
       <div className="bg-white border-b border-gray-200 p-4 shadow-sm z-10 flex-none">
         <div className="flex justify-between items-center mb-1">
-          <Button variant="ghost" onClick={onExit} className="!p-0 !min-h-0 text-gray-400 text-xs font-black uppercase tracking-widest hover:text-gray-900">Exit Match</Button>
+          <Button variant="ghost" onClick={handleExit} className="!p-0 !min-h-0 text-gray-400 text-xs font-black uppercase tracking-widest hover:text-gray-900">Exit Match</Button>
           <div className="text-[10px] font-black text-gray-400 tracking-widest uppercase bg-gray-50 px-2 py-1 rounded">{config.mode} • {config.n} DIGITS</div>
         </div>
         <div className="flex items-center gap-2">
@@ -455,7 +461,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
             </Button>
             <Button 
                 fullWidth 
-                onClick={isOnline ? () => { setIsReviewingHistory(false); setShowResultModal(true); } : onExit} 
+                onClick={isOnline ? () => { setIsReviewingHistory(false); setShowResultModal(true); } : handleExit} 
                 variant="ghost"
             >
                 {isOnline ? "BACK TO RESULT" : "EXIT"}
