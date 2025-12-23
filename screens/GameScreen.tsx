@@ -210,7 +210,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   };
 
   const handleExit = () => {
-    if (isOnline) {
+    if (isOnline || (config.mode === GameMode.SINGLE_PLAYER && gameState.phase === GamePhase.GAME_OVER)) {
       clearActiveSession();
     }
     onExit();
