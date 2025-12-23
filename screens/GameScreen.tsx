@@ -368,7 +368,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
 
             <div className="space-y-3 pt-2">
               <Button fullWidth onClick={handleRestartClick} variant="primary" className="h-14" disabled={isWaitingForResponse}>
-                {isWaitingForResponse ? 'WAITING...' : 'PLAY AGAIN'}
+                {isWaitingForResponse ? 'WAITING...' : (config.mode === GameMode.SINGLE_PLAYER ? 'PLAY AGAIN' : 'PLAY AGAIN')}
               </Button>
               <Button fullWidth onClick={() => { setShowResultModal(false); setIsReviewingHistory(true); }} variant="secondary">MATCH RECAP</Button>
               <Button fullWidth onClick={handleExit} variant="ghost">MAIN MENU</Button>
@@ -476,14 +476,14 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
                 variant="primary"
                 disabled={isWaitingForResponse}
             >
-                {isOnline ? (isWaitingForResponse ? "WAITING..." : "PLAY AGAIN") : "NEW MATCH"}
+                {isOnline ? (isWaitingForResponse ? "WAITING..." : "PLAY AGAIN") : (config.mode === GameMode.SINGLE_PLAYER ? "PLAY AGAIN" : "NEW MATCH")}
             </Button>
             <Button 
                 fullWidth 
-                onClick={isOnline ? () => { setIsReviewingHistory(false); setShowResultModal(true); } : handleExit} 
+                onClick={(isOnline || config.mode === GameMode.SINGLE_PLAYER) ? () => { setIsReviewingHistory(false); setShowResultModal(true); } : handleExit} 
                 variant="ghost"
             >
-                {isOnline ? "BACK TO RESULT" : "EXIT"}
+                {(isOnline || config.mode === GameMode.SINGLE_PLAYER) ? "BACK TO RESULT" : "EXIT"}
             </Button>
          </div>
       ) : !showResultModal && gameState.phase !== GamePhase.TRANSITION && (
