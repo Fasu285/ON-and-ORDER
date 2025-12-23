@@ -24,6 +24,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   // Play Again logic states
   const [playAgainRequest, setPlayAgainRequest] = useState<{ from: string } | null>(null);
   const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
+  const [rematchDeclinedBy, setRematchDeclinedBy] = useState<string | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const networkRef = useRef<NetworkAdapter | null>(null);
@@ -98,7 +99,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
           if (payload.accepted) {
               onRestart(config);
           } else {
-              alert(`${payload.username} declined the rematch.`);
+              setRematchDeclinedBy(payload.username);
           }
           return;
       }
@@ -298,6 +299,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
 
   const handleRestartClick = () => {
     if (isOnline) {
+        setRematchDeclinedBy(null); // Clear any previous decline message
         setIsWaitingForResponse(true);
         networkRef.current?.send('PLAY_AGAIN_REQUEST', { username: user.username });
     } else {
@@ -308,7 +310,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const handleAcceptRematch = () => {
       networkRef.current?.send('PLAY_AGAIN_RESPONSE', { accepted: true, username: user.username });
       setPlayAgainRequest(null);
-      onRestart(config);
+      onRestart(config); // Immediate restart
   };
 
   const handleDeclineRematch = () => {
@@ -323,7 +325,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       {/* Result Modal */}
       {showResultModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-black/70 backdrop-blur-md animate-fade-in">
-          <div className={`bg-white rounded-3xl w-full max-w-sm p-8 text-center space-y-6 shadow-2xl border-4 ${isUserWinner ? 'border-green-400 animate-celebrate' : 'border-red-300 animate-shake'}`}>
+          <div className={`bg-white rounded-3xl w-full max-sm p-8 text-center space-y-6 shadow-2xl border-4 ${isUserWinner ? 'border-green-400 animate-celebrate' : 'border-red-300 animate-shake'}`}>
             <h1 className={`text-5xl font-black uppercase tracking-tighter ${isUserWinner ? 'text-green-600' : 'text-red-600'}`}>
                 {isUserWinner ? 'VICTORY' : 'DEFEAT'}
             </h1>
@@ -368,8 +370,24 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
         </div>
       )}
 
+      {/* Rematch Declined Message Box */}
+      {rematchDeclinedBy && (
+        <div className="absolute inset-0 z-[70] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-fade-in">
+           <div className="bg-white rounded-3xl w-full max-w-xs p-8 text-center space-y-6 shadow-2xl border-4 border-red-500">
+                <div className="text-5xl">🚫</div>
+                <div className="space-y-2">
+                    <h3 className="text-xl font-black uppercase text-gray-900">Rematch Declined</h3>
+                    <p className="text-sm font-medium text-gray-500">
+                        <span className="text-red-600 font-bold">{rematchDeclinedBy}</span> has declined your request to play again.
+                    </p>
+                </div>
+                <Button fullWidth onClick={() => { setRematchDeclinedBy(null); setIsReviewingHistory(false); setShowResultModal(true); }}>BACK TO RESULT</Button>
+           </div>
+        </div>
+      )}
+
       {/* Waiting Overlay */}
-      {isWaitingForResponse && !playAgainRequest && (
+      {isWaitingForResponse && !playAgainRequest && !rematchDeclinedBy && (
           <div className="absolute inset-0 z-[55] flex items-center justify-center p-6 bg-black/20 backdrop-blur-[2px] animate-fade-in">
              <div className="bg-white rounded-2xl p-6 shadow-xl border border-gray-100 text-center space-y-4">
                  <div className="flex justify-center space-x-1">

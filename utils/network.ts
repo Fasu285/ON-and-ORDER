@@ -12,7 +12,7 @@ export class NetworkAdapter {
   private matchRef: any;
   private unsubscribeHost: (() => void) | null = null;
   private unsubscribeGuest: (() => void) | null = null;
-  private lastProcessedTimestamp: number = 0;
+  private lastProcessedTimestamp: number = Date.now(); // Start tracking from creation time to avoid stale messages
 
   constructor(matchId: string, userId: string, role: 'HOST' | 'GUEST', onMessage: NetworkEventCallback) {
     this.matchId = matchId;
