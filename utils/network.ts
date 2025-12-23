@@ -7,24 +7,31 @@ type NetworkEventCallback = (data: any) => void;
 export class NetworkAdapter {
   private matchId: string;
   private userId: string;
+  private role: 'HOST' | 'GUEST';
   private onMessage: NetworkEventCallback;
   private matchRef: any;
-  private unsubscribe: (() => void) | null = null;
+  private unsubscribeHost: (() => void) | null = null;
+  private unsubscribeGuest: (() => void) | null = null;
+  private lastProcessedTimestamp: number = 0;
 
-  constructor(matchId: string, userId: string, onMessage: NetworkEventCallback) {
+  constructor(matchId: string, userId: string, role: 'HOST' | 'GUEST', onMessage: NetworkEventCallback) {
     this.matchId = matchId;
     this.userId = userId;
+    this.role = role;
     this.onMessage = onMessage;
     
     if (db) {
       this.matchRef = ref(db, `matches/${matchId}`);
-      this.unsubscribe = onValue(this.matchRef, (snapshot) => {
+      
+      // Listen to the OPPONENT'S slot
+      const opponentRole = this.role === 'HOST' ? 'guestMessage' : 'hostMessage';
+      const opponentRef = ref(db, `matches/${matchId}/${opponentRole}`);
+      
+      this.unsubscribeHost = onValue(opponentRef, (snapshot) => {
         const val = snapshot.val();
-        if (val && val.lastMessage) {
-          // Only process messages from the other player and that are recent
-          if (val.lastMessage.from !== this.userId && val.lastMessage.timestamp > (Date.now() - 60000)) {
-             this.onMessage(val.lastMessage);
-          }
+        if (val && val.timestamp > this.lastProcessedTimestamp) {
+          this.lastProcessedTimestamp = val.timestamp;
+          this.onMessage(val);
         }
       });
     }
@@ -32,18 +39,22 @@ export class NetworkAdapter {
 
   public send(type: string, payload: any) {
     if (!db) return;
+    const myRoleSlot = this.role === 'HOST' ? 'hostMessage' : 'guestMessage';
     const message = { type, payload, timestamp: Date.now(), from: this.userId };
-    // CRITICAL FIX: Use update instead of set to avoid wiping out config and other match data
-    update(this.matchRef, { 
-      lastMessage: message, 
-      updatedAt: Date.now() 
-    }).catch(err => {
+    
+    // Update only our specific role's slot to prevent overwriting opponent's messages
+    const updates: any = {};
+    updates[`${myRoleSlot}`] = message;
+    updates['updatedAt'] = Date.now();
+    
+    update(this.matchRef, updates).catch(err => {
       console.error("Network send error:", err);
     });
   }
 
   public cleanup() {
-    if (this.unsubscribe) this.unsubscribe();
+    if (this.unsubscribeHost) this.unsubscribeHost();
+    if (this.unsubscribeGuest) this.unsubscribeGuest();
   }
 }
 
@@ -65,7 +76,7 @@ export const hostMatchInLobby = async (hostUser: { username: string, userId: str
     
     const expiresAt = new Date(Date.now() + 30 * 60000).toISOString(); // 30 min TTL
     
-    const lobbyEntry: LobbyEntry = {
+    const lobbyEntry: LobbyEntry & { guestUsername?: string } = {
         matchId,
         hostUserId: hostUser.userId,
         hostUsername: hostUser.username,
@@ -98,7 +109,7 @@ export const hostMatchInLobby = async (hostUser: { username: string, userId: str
     }
 };
 
-export const joinMatchByCode = async (code: string) => {
+export const joinMatchByCode = async (code: string, guestUsername: string) => {
     if (!db) throw new Error("Firebase not initialized.");
     
     const codeRef = ref(db, `joinCodes/${code}`);
@@ -116,26 +127,24 @@ export const joinMatchByCode = async (code: string) => {
 
     const { matchId } = snapshot.val();
     
-    // Transaction to ensure only one guest joins
+    // Transaction to ensure only one guest joins and record their name
     const lobbyRef = ref(db, `lobby/${matchId}`);
     const result = await runTransaction(lobbyRef, (current) => {
         if (!current) return; // Abort if entry missing
         if (current.status !== 'waiting_for_opponent') return; // Abort if already filled
-        return { ...current, status: 'playing' };
+        return { ...current, status: 'playing', guestUsername };
     });
 
     if (!result.committed || !result.snapshot.exists()) {
         throw new Error("Match is full or no longer available.");
     }
 
-    // Get the data from the lobby entry we just joined
     const lobbyData = result.snapshot.val();
     const config = {
         n: lobbyData.n,
         timeLimit: lobbyData.timeLimit
     };
 
-    // Cleanup the join code so it can't be used again
     await remove(codeRef);
     
     return { matchId, config };
@@ -159,10 +168,10 @@ export const listenToAvailableMatches = (callback: (entries: LobbyEntry[]) => vo
     });
 };
 
-export const listenToLobbyStatus = (matchId: string, callback: (status: string) => void) => {
+export const listenToLobbyStatus = (matchId: string, callback: (entry: any) => void) => {
     if (!db) return () => {};
-    const statusRef = ref(db, `lobby/${matchId}/status`);
-    return onValue(statusRef, (snapshot) => {
+    const lobbyRef = ref(db, `lobby/${matchId}`);
+    return onValue(lobbyRef, (snapshot) => {
         if (snapshot.exists()) {
             callback(snapshot.val());
         }

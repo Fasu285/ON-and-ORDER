@@ -29,9 +29,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   // Initial state setup with stored session recovery
   const [gameState, setGameState] = useState<GameState>(() => {
     const saved = getActiveSession();
-    if (saved && saved.config.mode === config.mode && saved.phase !== GamePhase.GAME_OVER) return saved;
+    if (saved && saved.config.matchCode === config.matchCode && saved.phase !== GamePhase.GAME_OVER) return saved;
     
-    // Guest must start in SETUP_P2 to allow secret input via isMyTurn logic
     const initialPhase = isOnline && !isHost ? GamePhase.SETUP_P2 : GamePhase.SETUP_P1;
 
     return {
@@ -61,7 +60,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const isPlayer1Turn = gameState.phase === GamePhase.TURN_P1;
   const isPlayer2Turn = gameState.phase === GamePhase.TURN_P2;
 
-  // Determine if it is the current local user's turn to interact
   const isMyTurn = 
     (gameState.phase === GamePhase.SETUP_P1 && (!isOnline || isHost)) ||
     (gameState.phase === GamePhase.SETUP_P2 && (config.mode === GameMode.TWO_PLAYER || (isOnline && !isHost))) ||
@@ -69,35 +67,18 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     (isPlayer2Turn && (config.mode === GameMode.TWO_PLAYER || (isOnline && !isHost)));
   
   const currentHistory = isPlayer1Turn ? gameState.player1History : gameState.player2History;
-  // Timer only runs during active guessing turns after first move or if specific game logic requires it
   const timerActive = (isPlayer1Turn || isPlayer2Turn) && currentHistory.length > 0 && !isAiThinking && gameState.phase !== GamePhase.GAME_OVER;
 
-  // AI Logic for Single Player
+  // Network Initialization
   useEffect(() => {
-    if (config.mode === GameMode.SINGLE_PLAYER && gameState.phase === GamePhase.TURN_P2 && !gameState.winner) {
-      setIsAiThinking(true);
-      const thinkTime = 1500 + Math.random() * 2000;
-      
-      const timeout = setTimeout(() => {
-        const aiGuess = generateRandomSecret(config.n);
-        processGuess(aiGuess);
-        setIsAiThinking(false);
-      }, thinkTime);
-
-      return () => clearTimeout(timeout);
-    }
-  }, [gameState.phase, config.mode, config.n, gameState.winner]);
-
-  // Network Initialization & Identity Exchange
-  useEffect(() => {
-    if (isOnline && config.matchCode) {
-        networkRef.current = new NetworkAdapter(config.matchCode, user.contact, (msg) => {
+    if (isOnline && config.matchCode && config.role) {
+        networkRef.current = new NetworkAdapter(config.matchCode, user.contact, config.role, (msg) => {
             handleNetworkMessage(msg);
         });
         networkRef.current.send('IDENTITY_EXCHANGE', { username: user.username });
         return () => networkRef.current?.cleanup();
     }
-  }, [isOnline, config.matchCode, user.contact, user.username]);
+  }, [isOnline, config.matchCode, config.role, user.contact, user.username]);
 
   const handleNetworkMessage = (msg: any) => {
       const { type, payload } = msg;
@@ -114,7 +95,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
                   newState.phase = GamePhase.TURN_P1;
                   newState.message = `${p1Name}'s Turn`;
               } else {
-                  // Keep message appropriate based on whether local player is ready
                   const localReady = isHost ? !!newState.player1Secret : !!newState.player2Secret;
                   newState.message = localReady ? "Waiting for opponent's secret..." : `${user.username}, set your secret`;
               }

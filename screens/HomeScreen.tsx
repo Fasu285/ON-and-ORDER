@@ -83,17 +83,18 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
             { n: selectedN, timeLimit: selectedTime }
         );
         setHostedMatch(result);
-        setStep('online-lobby'); // Immediately transition to lobby view to show the code
+        setStep('online-lobby'); 
         
-        // Listen for player arrival
-        statusUnsubRef.current = listenToLobbyStatus(result.matchId, (status) => {
-            if (status === 'playing') {
+        // Listen for player arrival and get their username
+        statusUnsubRef.current = listenToLobbyStatus(result.matchId, (entry) => {
+            if (entry && entry.status === 'playing') {
                 onStartGame({
                     mode: GameMode.ONLINE,
                     n: selectedN,
                     timeLimit: selectedTime,
                     matchCode: result.matchId,
-                    role: 'HOST'
+                    role: 'HOST',
+                    secondPlayerName: entry.guestUsername || 'Guest'
                 });
             }
         });
@@ -114,7 +115,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       setError(null);
       setIsBusy(true);
       try {
-          const { matchId, config } = await joinMatchByCode(code);
+          const { matchId, config } = await joinMatchByCode(code, user.username);
           if (!config) throw new Error("Could not retrieve match configuration.");
           
           onStartGame({
@@ -135,8 +136,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
       setError(null);
       setIsBusy(true);
       try {
-          const { matchId, config } = await joinMatchByCode(match.joinCode);
-          // Use match properties as primary fallback to avoid null errors
+          const { matchId, config } = await joinMatchByCode(match.joinCode, user.username);
           onStartGame({
               mode: GameMode.ONLINE,
               n: config?.n || match.n,
@@ -337,7 +337,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onStartGame, onResumeGame
         </div>
       )}
       
-      <div className="mt-auto text-center text-[8px] text-gray-300 py-4 font-black uppercase tracking-widest">v1.6.1</div>
+      <div className="mt-auto text-center text-[8px] text-gray-300 py-4 font-black uppercase tracking-widest">v1.6.2</div>
     </div>
   );
 };
