@@ -184,6 +184,25 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [timerActive]);
 
+  // CPU Move logic for Single Player
+  useEffect(() => {
+    if (
+      config.mode === GameMode.SINGLE_PLAYER && 
+      gameState.phase === GamePhase.TURN_P2 && 
+      !gameState.winner && 
+      !isAiThinking
+    ) {
+      setIsAiThinking(true);
+      const thinkTime = Math.random() * 1000 + 1000; // 1-2 seconds delay
+      const timer = setTimeout(() => {
+        const cpuGuess = generateRandomSecret(config.n);
+        processGuess(cpuGuess);
+        setIsAiThinking(false);
+      }, thinkTime);
+      return () => clearTimeout(timer);
+    }
+  }, [gameState.phase, gameState.winner, config.mode, config.n]);
+
   const handleDigitPress = (digit: string) => {
     if (input.length < config.n && !input.includes(digit)) {
       setInput(prev => prev + digit);
