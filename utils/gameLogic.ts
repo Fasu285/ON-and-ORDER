@@ -1,4 +1,4 @@
-import { TestVector } from '../types';
+import { TestVector, GuessResult } from '../types';
 
 /**
  * Validates a sequence of digits.
@@ -72,6 +72,46 @@ export const generateRandomSecret = (n: number): string => {
     available.splice(randomIndex, 1);
   }
   return secret;
+};
+
+/**
+ * CPU logic for Single Player: Returns a guess consistent with history.
+ * This implements an elimination algorithm to find a sequence that matches 
+ * all previous feedback received by the CPU.
+ */
+export const getCpuPerfectGuess = (n: number, history: GuessResult[]): string => {
+  if (history.length === 0) {
+    return generateRandomSecret(n);
+  }
+
+  const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+  const candidates: string[] = [];
+
+  const backtrack = (current: string) => {
+    if (current.length === n) {
+      // Check consistency with ALL history
+      const isConsistent = history.every(move => {
+        const check = computeOnAndOrder(current, move.guess);
+        return check.on === move.on && check.order === move.order;
+      });
+      if (isConsistent) candidates.push(current);
+      return;
+    }
+    for (const d of digits) {
+      if (!current.includes(d)) {
+        backtrack(current + d);
+      }
+    }
+  };
+
+  backtrack('');
+
+  if (candidates.length === 0) return generateRandomSecret(n);
+  
+  // To be a "perfect" opponent, we could just return the first one, 
+  // but picking a random valid candidate makes it feel slightly more natural 
+  // while remaining mathematically sound based on information available.
+  return candidates[Math.floor(Math.random() * candidates.length)];
 };
 
 export const runTestVectors = (vectors: TestVector[]): { passed: boolean; details: string[] } => {

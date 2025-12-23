@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameConfig, GameState, GameMode, GuessResult, GamePhase, User } from '../types';
-import { validateSequence, computeOnAndOrder, generateRandomSecret } from '../utils/gameLogic';
+import { validateSequence, computeOnAndOrder, generateRandomSecret, getCpuPerfectGuess } from '../utils/gameLogic';
 import { saveActiveSession, getActiveSession, clearActiveSession, saveMatchRecord } from '../utils/storage';
 import { NetworkAdapter } from '../utils/network';
 import Keypad from '../components/Keypad';
@@ -195,13 +195,13 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       setIsAiThinking(true);
       const thinkTime = Math.random() * 1000 + 1000; // 1-2 seconds delay
       const timer = setTimeout(() => {
-        const cpuGuess = generateRandomSecret(config.n);
+        const cpuGuess = getCpuPerfectGuess(config.n, gameState.player2History);
         processGuess(cpuGuess);
         setIsAiThinking(false);
       }, thinkTime);
       return () => clearTimeout(timer);
     }
-  }, [gameState.phase, gameState.winner, config.mode, config.n]);
+  }, [gameState.phase, gameState.winner, config.mode, config.n, gameState.player2History]);
 
   const handleDigitPress = (digit: string) => {
     if (input.length < config.n && !input.includes(digit)) {
