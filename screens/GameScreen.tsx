@@ -32,10 +32,15 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const isOnline = config.mode === GameMode.ONLINE;
   const isHost = config.role === 'HOST';
 
-  // Initial state setup with stored session recovery
+  // Initial state setup
   const [gameState, setGameState] = useState<GameState>(() => {
-    const saved = getActiveSession();
-    if (saved && saved.config.matchCode === config.matchCode && saved.phase !== GamePhase.GAME_OVER) return saved;
+    // For online games, we strictly clear stale sessions to prevent "stuck" states
+    if (isOnline) {
+      clearActiveSession();
+    } else {
+      const saved = getActiveSession();
+      if (saved && saved.config.matchCode === config.matchCode && saved.phase !== GamePhase.GAME_OVER) return saved;
+    }
     
     const initialPhase = isOnline && !isHost ? GamePhase.SETUP_P2 : GamePhase.SETUP_P1;
 
@@ -66,6 +71,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const isPlayer1Turn = gameState.phase === GamePhase.TURN_P1;
   const isPlayer2Turn = gameState.phase === GamePhase.TURN_P2;
 
+  // turn logic: Host is always P1, Guest is always P2
   const isMyTurn = 
     (gameState.phase === GamePhase.SETUP_P1 && (!isOnline || isHost)) ||
     (gameState.phase === GamePhase.SETUP_P2 && (config.mode === GameMode.TWO_PLAYER || (isOnline && !isHost))) ||
@@ -73,7 +79,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     (isPlayer2Turn && (config.mode === GameMode.TWO_PLAYER || (isOnline && !isHost)));
   
   const currentHistory = isPlayer1Turn ? gameState.player1History : gameState.player2History;
-  const timerActive = (isPlayer1Turn || isPlayer2Turn) && currentHistory.length > 0 && !isAiThinking && gameState.phase !== GamePhase.GAME_OVER;
+  const timerActive = (isPlayer1Turn || isPlayer2Turn) && !isAiThinking && gameState.phase !== GamePhase.GAME_OVER;
 
   // Network Initialization
   useEffect(() => {
@@ -110,6 +116,9 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
           }
           if (type === 'SECRET_SET') {
               const newState = { ...prev };
+              // In Online mode: Host is P1, Guest is P2
+              // If current player is Host, they receive from Guest (P2)
+              // If current player is Guest, they receive from Host (P1)
               if (isHost) newState.player2Secret = payload.secret;
               else newState.player1Secret = payload.secret;
               
@@ -123,9 +132,11 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
               return newState;
           }
           if (type === 'GUESS_SUBMITTED') {
-              const isP1Turn = prev.phase === GamePhase.TURN_P1;
-              const historyKey = isP1Turn ? 'player1History' : 'player2History';
-              const targetSecret = isP1Turn ? prev.player2Secret : prev.player1Secret;
+              // Determine whose guess it is based on WHO SENT IT
+              // If Guest receives, it's a Host (P1) guess. If Host receives, it's a Guest (P2) guess.
+              const isP1Guess = !isHost; 
+              const historyKey = isP1Guess ? 'player1History' : 'player2History';
+              const targetSecret = isP1Guess ? prev.player2Secret : prev.player1Secret;
               
               const result = computeOnAndOrder(targetSecret, payload.guess);
               const guessResult = { ...result, guess: payload.guess, timestamp: new Date().toISOString() };
@@ -134,7 +145,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
               const won = result.order === config.n;
               
               if (won) {
-                  const winnerName = isP1Turn ? p1Name : p2Name;
+                  const winnerName = isP1Guess ? p1Name : p2Name;
                   return {
                       ...prev,
                       [historyKey]: newHistory,
@@ -144,7 +155,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
                   };
               }
 
-              const nextPhase = isP1Turn ? GamePhase.TURN_P2 : GamePhase.TURN_P1;
+              // After an online guess, it's always the other player's turn
+              const nextPhase = isP1Guess ? GamePhase.TURN_P2 : GamePhase.TURN_P1;
               const nextName = nextPhase === GamePhase.TURN_P1 ? p1Name : p2Name;
 
               return {
@@ -184,22 +196,18 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [timerActive]);
 
-  // Task 1: Handle turn timeout (Timer reached 0)
   useEffect(() => {
     if (gameState.timeLeft === 0 && (isPlayer1Turn || isPlayer2Turn) && isMyTurn && !isAiThinking && !showResultModal) {
       let finalGuess = input;
-      // If current input is not a full valid guess, take the last guess from history
       if (input.length !== config.n) {
         const history = isPlayer1Turn ? gameState.player1History : gameState.player2History;
         if (history.length > 0) {
           finalGuess = history[history.length - 1].guess;
         } else {
-          // If no history exists yet, generate a random guess as a last resort
           finalGuess = generateRandomSecret(config.n);
         }
       }
 
-      // Auto-submit the determined guess
       if (isOnline) {
         networkRef.current?.send('GUESS_SUBMITTED', { guess: finalGuess });
       }
@@ -217,7 +225,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
       !isAiThinking
     ) {
       setIsAiThinking(true);
-      const thinkTime = Math.random() * 1000 + 1000; // 1-2 seconds delay
+      const thinkTime = Math.random() * 1000 + 1000;
       const timer = setTimeout(() => {
         const cpuGuess = getCpuPerfectGuess(config.n, gameState.player2History);
         processGuess(cpuGuess);
@@ -348,7 +356,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
 
   const handleRestartClick = () => {
     if (isOnline) {
-        setRematchDeclinedBy(null); // Clear any previous decline message
+        setRematchDeclinedBy(null);
         setIsWaitingForResponse(true);
         networkRef.current?.send('PLAY_AGAIN_REQUEST', { username: user.username });
     } else {
@@ -359,7 +367,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
   const handleAcceptRematch = () => {
       networkRef.current?.send('PLAY_AGAIN_RESPONSE', { accepted: true, username: user.username });
       setPlayAgainRequest(null);
-      onRestart(config); // Immediate restart
+      onRestart(config);
   };
 
   const handleDeclineRematch = () => {
@@ -465,7 +473,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
         </div>
       </div>
 
-      {/* Game Content */}
+      {/* Game Content - Always Column 1 for P1 (Host) and Column 2 for P2 (Guest) */}
       <div className="flex-1 flex flex-row overflow-hidden bg-white">
         <div className="flex-1 flex flex-col border-r border-gray-100">
           <div className={`p-2 text-center text-[10px] font-black uppercase tracking-widest border-b ${isPlayer1Turn ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-400'}`}>
