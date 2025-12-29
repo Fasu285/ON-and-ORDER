@@ -184,6 +184,30 @@ const GameScreen: React.FC<GameScreenProps> = ({ config, user, onExit, onRestart
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [timerActive]);
 
+  // Task 1: Handle turn timeout (Timer reached 0)
+  useEffect(() => {
+    if (gameState.timeLeft === 0 && (isPlayer1Turn || isPlayer2Turn) && isMyTurn && !isAiThinking && !showResultModal) {
+      let finalGuess = input;
+      // If current input is not a full valid guess, take the last guess from history
+      if (input.length !== config.n) {
+        const history = isPlayer1Turn ? gameState.player1History : gameState.player2History;
+        if (history.length > 0) {
+          finalGuess = history[history.length - 1].guess;
+        } else {
+          // If no history exists yet, generate a random guess as a last resort
+          finalGuess = generateRandomSecret(config.n);
+        }
+      }
+
+      // Auto-submit the determined guess
+      if (isOnline) {
+        networkRef.current?.send('GUESS_SUBMITTED', { guess: finalGuess });
+      }
+      processGuess(finalGuess);
+      setInput('');
+    }
+  }, [gameState.timeLeft, gameState.phase, isMyTurn]);
+
   // CPU Move logic for Single Player
   useEffect(() => {
     if (

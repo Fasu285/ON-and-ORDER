@@ -12,7 +12,8 @@ export class NetworkAdapter {
   private matchRef: any;
   private unsubscribeHost: (() => void) | null = null;
   private unsubscribeGuest: (() => void) | null = null;
-  private lastProcessedTimestamp: number = Date.now(); // Start tracking from creation time to avoid stale messages
+  // Initialize with a grace period (15 seconds) to catch messages sent during component remounts/rematches
+  private lastProcessedTimestamp: number = Date.now() - 15000; 
 
   constructor(matchId: string, userId: string, role: 'HOST' | 'GUEST', onMessage: NetworkEventCallback) {
     this.matchId = matchId;
