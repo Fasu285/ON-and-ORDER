@@ -1,8 +1,6 @@
-
 import { initializeApp } from "firebase/app";
-import { getDatabase, type Database } from "firebase/database";
+import { getDatabase, Database } from "firebase/database";
 
-// Helper to safely access env vars in Vite
 const getEnv = (key: string) => {
   try {
     // @ts-ignore
@@ -10,9 +8,7 @@ const getEnv = (key: string) => {
       // @ts-ignore
       return import.meta.env[key];
     }
-  } catch (e) {
-    // Ignore errors
-  }
+  } catch (e) {}
   return "";
 };
 
@@ -26,7 +22,6 @@ const firebaseConfig = {
   appId: getEnv("VITE_FIREBASE_APP_ID") || "REPLACE_WITH_YOUR_APP_ID",
 };
 
-let app;
 let db: Database | null = null;
 
 const isConfigured = firebaseConfig.apiKey && 
@@ -34,16 +29,15 @@ const isConfigured = firebaseConfig.apiKey &&
                      !firebaseConfig.apiKey.includes("REPLACE");
 
 if (isConfigured) {
-    try {
-        app = initializeApp(firebaseConfig);
-        db = getDatabase(app);
-        console.log("Firebase initialized successfully");
-    } catch (e) {
-        console.error("Firebase initialization error:", e);
-    }
+  try {
+    const app = initializeApp(firebaseConfig);
+    db = getDatabase(app);
+    console.log("Firebase initialized successfully");
+  } catch (e) {
+    console.error("Firebase initialization error:", e);
+  }
 } else {
-    // Info log instead of warning to reduce console noise in offline/demo modes
-    console.info("Firebase not configured. Running in offline/demo mode.");
+  console.info("Firebase not configured. Running in offline/demo mode.");
 }
 
 export { db };
